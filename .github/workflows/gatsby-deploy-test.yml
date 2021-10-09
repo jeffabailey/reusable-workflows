@@ -1,0 +1,14 @@
+name: Call a reusable workflow
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  call-workflow-passing-data:
+    uses: jeffabailey/reusable-workflows/.github/workflows/gatsby-deploy-test.yml
+    with:
+      username: mona
+    secrets:
+      token: ${{ secrets.TOKEN }}
