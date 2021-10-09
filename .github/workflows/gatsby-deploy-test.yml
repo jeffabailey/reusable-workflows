@@ -9,6 +9,6 @@ jobs:
   call-workflow-passing-data:
     uses: jeffabailey/reusable-workflows/.github/workflows/gatsby-deploy.yml@master
     with:
-      username: mona
+      username: mona1
     secrets:
       token: ${{ secrets.TOKEN }}
