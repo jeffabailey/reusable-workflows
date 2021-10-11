@@ -6,10 +6,9 @@ on:
       website_repository:
         required: true
         type: string
-      secrets:
-        SLACK_WEBHOOK:
-          required: true
-          type: string        
+      SLACK_WEBHOOK:
+        required: true
+        type: string        
 jobs:
   slackNotification:
     name: Slack Notification
