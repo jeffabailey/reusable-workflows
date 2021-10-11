@@ -3,12 +3,9 @@ name: Reusable workflow example
 on:
   workflow_call:
     inputs:
-      username:
+      website_repository:
         required: true
         type: string
-    secrets:
-      token:
-        required: true
 jobs:
   slackNotification:
     name: Slack Notification
