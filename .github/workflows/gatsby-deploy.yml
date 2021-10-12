@@ -77,7 +77,7 @@ jobs:
           path: gatsby
           token: ${{ secrets.ACCESS_TOKEN }}
 
-      - name: Create Config
+      - name: List Files
         run: |
           ls ${{env.working-directory}}
 
