@@ -18,7 +18,7 @@ jobs:
     - name: Slack Notification
       uses: rtCamp/action-slack-notify@v2
       env:
-        SLACK_WEBHOOK: ${{ inputs.SLACK_WEBHOOK }}
+        SLACK_WEBHOOK: ${{ secrets.slack_webhook }}
         SLACK_CHANNEL: canzan-websites-jeff
         SLACK_COLOR: ${{ job.status }} # or a specific color like 'good' or '#ff00ff'
         SLACK_ICON: https://github.com/rtCamp.png?size=48
@@ -29,7 +29,7 @@ jobs:
     env:
       working-directory: ./gatsby
       node-version: "15.10.0"
-      SLACK_WEBHOOK: ${{ inputs.SLACK_WEBHOOK }}
+      SLACK_WEBHOOK: ${{ secrets.slack_webhook }}
       SLACK_CHANNEL: canzan-websites-jeff
       SLACK_ICON: https://github.com/rtCamp.png?size=48
       SLACK_TITLE: Deployed Website
@@ -46,8 +46,8 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-access-key-id: ${{ secrets.aws_access_key_id }}
+          aws-secret-access-key: ${{ secrets.aws_secret_access_key }}
           aws-region: us-east-1
 
       - name: Checkout
