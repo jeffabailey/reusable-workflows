@@ -65,11 +65,14 @@ jobs:
       
       - name: List Files
         run: |
-          ls ${{env.working-directory}}
+          ls -al
 
       - name: Simple Dotenv
         uses: xom9ikk/dotenv@v1.0.2
-
+        # with:
+        #   path: ${{env.working-directory}}
+        #   mode: development
+          
       - name: Set Default Git Branch
         run: |
           git config --global init.defaultBranch master
