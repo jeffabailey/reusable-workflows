@@ -62,6 +62,10 @@ jobs:
           repository: ${{ inputs.website_repository }}
           path: gatsby
           token: ${{ secrets.ACCESS_TOKEN }}        
+      
+      - name: List Files
+        run: |
+          ls ${{env.working-directory}}
 
       - name: Simple Dotenv
         uses: xom9ikk/dotenv@v1.0.2
@@ -76,10 +80,6 @@ jobs:
           repository: jeffabailey/gatsby
           path: gatsby
           token: ${{ secrets.ACCESS_TOKEN }}
-
-      - name: List Files
-        run: |
-          ls ${{env.working-directory}}
 
       - name: Create Config
         run: |
