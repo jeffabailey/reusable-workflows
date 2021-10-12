@@ -6,9 +6,19 @@ on:
       website_repository:
         required: true
         type: string
-      SLACK_WEBHOOK:
+    secrets:
+      slack_webhook:
         required: true
-        type: string        
+        type: string
+      aws_access_key_id:
+        required: true
+        type: string
+      aws_secret_access_key:
+        required: true
+        type: string
+      access_token:
+        required: true
+        type: string
 jobs:
   slackNotification:
     name: Slack Notification
