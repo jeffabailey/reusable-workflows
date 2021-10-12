@@ -1,4 +1,4 @@
-name: Reusable workflow example
+name: Gatsby Deploy
 
 on:
   workflow_call:
@@ -25,7 +25,7 @@ jobs:
       uses: rtCamp/action-slack-notify@v2
       env:
         SLACK_WEBHOOK: ${{ secrets.slack_webhook }}
-        SLACK_CHANNEL: canzan-websites-jeff
+        SLACK_CHANNEL: ${{ inputs.slack_channel }}
         SLACK_COLOR: ${{ job.status }} # or a specific color like 'good' or '#ff00ff'
         SLACK_ICON: https://github.com/rtCamp.png?size=48
         SLACK_USERNAME: github-action-slack-notify  
@@ -36,7 +36,7 @@ jobs:
       working-directory: ./gatsby
       node-version: "15.10.0"
       SLACK_WEBHOOK: ${{ secrets.slack_webhook }}
-      SLACK_CHANNEL: canzan-websites-jeff
+      SLACK_CHANNEL: ${{ inputs.slack_channel }}
       SLACK_ICON: https://github.com/rtCamp.png?size=48
       SLACK_TITLE: Deployed Website
       SLACK_USERNAME: github-action-slack-notify      
@@ -66,6 +66,7 @@ jobs:
         run: |
           ls -al
 
+      # https://github.com/xom9ikk/dotenv
       - name: Simple Dotenv
         uses: xom9ikk/dotenv@v1.0.2
           
