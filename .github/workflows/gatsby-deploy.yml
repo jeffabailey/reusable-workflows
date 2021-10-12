@@ -79,6 +79,10 @@ jobs:
 
       - name: Create Config
         run: |
+          ls ${{env.working-directory}}
+
+      - name: Create Config
+        run: |
           ${{env.working-directory}}/scripts/generate_react_config.sh ./.env > ${{env.working-directory}}/wordpress/config.ts
 
       - name: Print Config
