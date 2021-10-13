@@ -6,6 +6,9 @@ on:
       website_repository:
         required: true
         type: string
+      slack_channel:
+        required: true
+        type: string        
     secrets:
       slack_webhook:
         required: true
