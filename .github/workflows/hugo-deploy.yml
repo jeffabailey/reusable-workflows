@@ -84,7 +84,7 @@ jobs:
           # extended: true
 
       - name: Build
-        run: cd ./hugo && hugo --minify
+        run: rm -rf ./hugo/public/* && cd ./hugo && hugo --minify
 
       - name: S3 Sync
         run: aws s3 sync ./hugo/public s3://jeffbaileyblog --delete --acl bucket-owner-full-control --acl public-read --cache-control max-age=31536000,public
