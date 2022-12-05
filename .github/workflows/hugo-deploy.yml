@@ -1,0 +1,88 @@
+name: Hugo Deploy
+
+on:
+  workflow_call:
+    inputs:
+      website_repository:
+        required: true
+        type: string
+      slack_channel:
+        required: true
+        type: string
+    secrets:
+      slack_webhook:
+        required: true
+      aws_access_key_id:
+        required: true
+      aws_secret_access_key:
+        required: true
+      access_token:
+        required: true
+jobs:
+  slackNotification:
+    name: Slack Notification
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Slack Notification
+      uses: rtCamp/action-slack-notify@v2
+      env:
+        SLACK_WEBHOOK: ${{ secrets.slack_webhook }}
+        SLACK_CHANNEL: ${{ inputs.slack_channel }}
+        SLACK_COLOR: ${{ job.status }} # or a specific color like 'good' or '#ff00ff'
+        SLACK_ICON: https://github.com/rtCamp.png?size=48
+        SLACK_USERNAME: github-action-slack-notify
+  deploywebsite:
+    name: "Deploy Website"
+    runs-on: ubuntu-latest
+    env:
+      working-directory: ./gatsby
+      node-version: "15.10.0"
+      SLACK_WEBHOOK: ${{ secrets.slack_webhook }}
+      SLACK_CHANNEL: ${{ inputs.slack_channel }}
+      SLACK_ICON: https://github.com/rtCamp.png?size=48
+      SLACK_TITLE: Deployed Website
+      SLACK_USERNAME: github-action-slack-notify
+    strategy:
+      matrix:
+        node-version: [15.x]
+    steps:
+      - name: Slack Notification
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_MESSAGE: 'Deploying website :earth_americas:'
+          SLACK_COLOR: ${{ job.status }} # or a specific color like 'good' or '#ff00ff'
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.aws_access_key_id }}
+          aws-secret-access-key: ${{ secrets.aws_secret_access_key }}
+          aws-region: us-east-1
+
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          repository: ${{ inputs.website_repository }}
+          token: ${{ secrets.ACCESS_TOKEN }}
+
+      - name: List Files
+        run: |
+          ls -al
+
+      # https://github.com/xom9ikk/dotenv
+      - name: Simple Dotenv
+        uses: xom9ikk/dotenv@v1.0.2
+
+      - name: Set Default Git Branch
+        run: |
+          git config --global init.defaultBranch master
+
+      - name: Set Default Git Branch
+        run: |
+          hugo
+
+      - name: Slack Notification
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_MESSAGE: 'Deployed website ${{env.working-directory}} :earth_americas:'
+          SLACK_COLOR: ${{ job.status }} # or a specific color like 'good' or '#ff00ff'
