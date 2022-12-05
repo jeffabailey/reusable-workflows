@@ -77,9 +77,14 @@ jobs:
         run: |
           git config --global init.defaultBranch master
 
-      - name: Set Default Git Branch
-        run: |
-          hugo
+      - name: Setup Hugo
+        uses: peaceiris/actions-hugo@v2
+        with:
+          hugo-version: '0.91.2'
+          # extended: true
+
+      - name: Build
+        run: cd ./hugo && hugo --minify
 
       - name: Slack Notification
         uses: rtCamp/action-slack-notify@v2
