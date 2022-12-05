@@ -87,7 +87,7 @@ jobs:
         run: cd ./hugo && hugo --minify
 
       - name: S3 Sync
-        run: aws s3 sync ./public s3://unintelligent-design --delete --acl bucket-owner-full-control --acl public-read --cache-control max-age=31536000,public
+        run: aws s3 sync ./hugo/public s3://unintelligent-design --delete --acl bucket-owner-full-control --acl public-read --cache-control max-age=31536000,public
 
       - name: Cloudfront Invalidate
         run: aws cloudfront create-invalidation --distribution-id E1KK73BPCX1SXW --paths "/*"
