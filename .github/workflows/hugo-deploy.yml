@@ -90,7 +90,7 @@ jobs:
         run: aws s3 sync ./hugo/public s3://jeffbaileyblog --delete --acl bucket-owner-full-control --acl public-read --cache-control max-age=31536000,public
 
       - name: Cloudfront Invalidate
-        run: aws cloudfront create-invalidation --distribution-id E1KK73BPCX1SXW --paths "/*"
+        run: aws cloudfront create-invalidation --distribution-id ${{ env.CLOUDFRONT_DISTRIBUTION_ID }} --paths "/*"
 
       - name: Slack Notification
         uses: rtCamp/action-slack-notify@v2
