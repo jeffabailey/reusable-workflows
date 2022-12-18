@@ -99,7 +99,6 @@ jobs:
         with:
           urls: |
             ${{ env.SITE_META_URL }}
-            ${{ env.SITE_META_URL }}/blog
           budgetPath: ./budget.json # test performance budgets
           uploadArtifacts: true # save results as an action artifacts
           temporaryPublicStorage: true # upload lighthouse report to the temporary
