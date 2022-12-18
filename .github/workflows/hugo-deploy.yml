@@ -92,6 +92,18 @@ jobs:
       - name: Cloudfront Invalidate
         run: aws cloudfront create-invalidation --distribution-id ${{ env.CLOUDFRONT_DISTRIBUTION_ID }} --paths "/*"
 
+
+      - uses: actions/checkout@v3
+      - name: Audit URLs using Lighthouse
+        uses: treosh/lighthouse-ci-action@v9
+        with:
+          urls: |
+            "${{ env.SITE_META_URL }}"
+            "${{ env.SITE_META_URL }}/blog"
+          budgetPath: ./budget.json # test performance budgets
+          uploadArtifacts: true # save results as an action artifacts
+          temporaryPublicStorage: true # upload lighthouse report to the temporary
+
       - name: Slack Notification
         uses: rtCamp/action-slack-notify@v2
         env:
