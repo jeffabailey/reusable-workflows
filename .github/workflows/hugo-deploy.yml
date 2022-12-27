@@ -87,25 +87,25 @@ jobs:
         timeout-minutes: 15
         run: rm -rf ./hugo/public/* && cd ./hugo && hugo --minify --debug
 
-      # - name: S3 Sync
-      #   run: aws s3 sync ./hugo/public s3://${{ env.S3_BUCKET_NAME }} --delete --acl bucket-owner-full-control --acl public-read --cache-control max-age=31536000,public
+      - name: S3 Sync
+        run: aws s3 sync ./hugo/public s3://${{ env.S3_BUCKET_NAME }} --delete --acl bucket-owner-full-control --acl public-read --cache-control max-age=31536000,public
 
-      # - name: Cloudfront Invalidate
-      #   run: aws cloudfront create-invalidation --distribution-id ${{ env.CLOUDFRONT_DISTRIBUTION_ID }} --paths "/*"
+      - name: Cloudfront Invalidate
+        run: aws cloudfront create-invalidation --distribution-id ${{ env.CLOUDFRONT_DISTRIBUTION_ID }} --paths "/*"
 
 
-      # - uses: actions/checkout@v3
-      # - name: Audit URLs using Lighthouse
-      #   uses: treosh/lighthouse-ci-action@v9
-      #   with:
-      #     urls: |
-      #       ${{ env.SITE_META_URL }}
-      #     budgetPath: ./budget.json # test performance budgets
-      #     uploadArtifacts: true # save results as an action artifacts
-      #     temporaryPublicStorage: true # upload lighthouse report to the temporary
+      - uses: actions/checkout@v3
+      - name: Audit URLs using Lighthouse
+        uses: treosh/lighthouse-ci-action@v9
+        with:
+          urls: |
+            ${{ env.SITE_META_URL }}
+          budgetPath: ./budget.json # test performance budgets
+          uploadArtifacts: true # save results as an action artifacts
+          temporaryPublicStorage: true # upload lighthouse report to the temporary
 
-      # - name: Slack Notification
-      #   uses: rtCamp/action-slack-notify@v2
-      #   env:
-      #     SLACK_MESSAGE: 'Deployed website ${{env.working-directory}} :earth_americas:'
-      #     SLACK_COLOR: ${{ job.status }} # or a specific color like 'good' or '#ff00ff'
+      - name: Slack Notification
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_MESSAGE: 'Deployed website ${{env.working-directory}} :earth_americas:'
+          SLACK_COLOR: ${{ job.status }} # or a specific color like 'good' or '#ff00ff'
