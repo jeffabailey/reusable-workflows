@@ -84,6 +84,7 @@ jobs:
           # extended: true
 
       - name: Build
+        timeout-minutes: 15
         run: rm -rf ./hugo/public/* && cd ./hugo && hugo --minify
 
       - name: S3 Sync
