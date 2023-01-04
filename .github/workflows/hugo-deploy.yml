@@ -60,7 +60,7 @@ jobs:
           aws-region: us-east-1
 
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           repository: ${{ inputs.website_repository }}
           token: ${{ secrets.ACCESS_TOKEN }}
@@ -93,8 +93,6 @@ jobs:
       - name: Cloudfront Invalidate
         run: aws cloudfront create-invalidation --distribution-id ${{ env.CLOUDFRONT_DISTRIBUTION_ID }} --paths "/*"
 
-
-      - uses: actions/checkout@v3
       - name: Audit URLs using Lighthouse
         uses: treosh/lighthouse-ci-action@v9
         with:
