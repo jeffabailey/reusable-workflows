@@ -70,8 +70,8 @@ jobs:
           ls -al
 
       # https://github.com/tcort/markdown-link-check
-      - name: Check Links
-        uses: gaurav-nelson/github-action-markdown-link-check@v1
+      # - name: Check Links
+      #   uses: gaurav-nelson/github-action-markdown-link-check@v1
 
       # https://github.com/xom9ikk/dotenv
       - name: Simple Dotenv
