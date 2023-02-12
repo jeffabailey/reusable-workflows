@@ -47,9 +47,6 @@ jobs:
       matrix:
         node-version: [15.x]
     steps:
-      - name: Cleanup
-        uses: rtCamp/action-cleanup@master
-
       - name: Slack Notification
         uses: rtCamp/action-slack-notify@v2
         env:
@@ -115,3 +112,6 @@ jobs:
         env:
           SLACK_MESSAGE: 'Deployed website ${{env.working-directory}} :earth_americas:'
           SLACK_COLOR: ${{ job.status }} # or a specific color like 'good' or '#ff00ff'
+
+      - name: Cleanup
+        uses: rtCamp/action-cleanup@master          
