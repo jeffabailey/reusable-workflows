@@ -47,6 +47,9 @@ jobs:
       matrix:
         node-version: [15.x]
     steps:
+      - name: Cleanup
+        uses: rtCamp/action-cleanup@master
+
       - name: Slack Notification
         uses: rtCamp/action-slack-notify@v2
         env:
