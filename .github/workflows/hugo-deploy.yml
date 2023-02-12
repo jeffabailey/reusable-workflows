@@ -93,6 +93,7 @@ jobs:
         run: rm -rf ./hugo/public/* && cd ./hugo && hugo --minify --ignoreCache --cleanDestinationDir --gc
 
       - name: List Hugo Public Folder
+        timeout-minutes: 15
         run: ls -R public/
 
       - name: S3 Sync
