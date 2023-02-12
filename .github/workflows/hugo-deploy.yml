@@ -90,7 +90,7 @@ jobs:
 
       - name: Build
         timeout-minutes: 15
-        run: rm -rf ./hugo/public/* && cd ./hugo && hugo --minify --cleanDestinationDir
+        run: rm -rf ./hugo/public/* && cd ./hugo && hugo -minify --ignoreCache --cleanDestinationDir --gc
 
       - name: S3 Sync
         run: aws s3 sync ./hugo/public s3://${{ env.S3_BUCKET_NAME }} --delete --acl bucket-owner-full-control --acl public-read --cache-control max-age=31536000,public
