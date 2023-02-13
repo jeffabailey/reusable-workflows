@@ -125,9 +125,9 @@ jobs:
       #     image: klakegg/hugo:0.101.0
       #     options: hugo version 
 
-      # - name: Build
-      #   timeout-minutes: 15
-      #   run: rm -rf ./hugo/public/* && cd ./hugo && hugo --minify --ignoreCache --cleanDestinationDir --gc
+      - name: Build
+        timeout-minutes: 15
+        run: rm -rf ./hugo/public/* && cd ./hugo && hugo --minify --ignoreCache --cleanDestinationDir --gc
 
       # Only files if needed: $ find . -depth -type f | xargs -n 1 rename 's/(.*)\/([^\/]*)/$1\/\L$2/' {} \;
 
