@@ -89,10 +89,18 @@ jobs:
           version: '0.101.0'
           command: --minify --ignoreCache --cleanDestinationDir --gc
 
-      # THE PREVIOUS LINE IS FUCKING PISSING ME OFF, IT'S CREATING MIXED CASE FILES
+      - name: Find Mixed Case Files
+        timeout-minutes: 15
+        run: find . -regextype egrep -type f -regex '[^[:lower:]]*'
+
+      # THE Run Hugo ACTION IS FUCKING PISSING ME OFF, IT'S CREATING MIXED CASE FILES
       - name: Lowercase Everything
         timeout-minutes: 15
-        run: find ./hugo -depth | xargs -n 1 rename 's/(.*)\/([^\/]*)/$1\/\L$2/' {} \;
+        run: for i in $( ls | grep [A-Z] ); do mv -i $i `echo $i | tr 'A-Z' 'a-z'`; done
+
+      - name: Find Mixed Case Files 2
+        timeout-minutes: 15
+        run: find . -regextype egrep -type f -regex '[^[:lower:]]*'
 
       # https://github.com/peaceiris/actions-hugo
       # - name: Setup Hugo
