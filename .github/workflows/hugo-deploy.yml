@@ -81,10 +81,12 @@ jobs:
         run: |
           git config --global init.defaultBranch master
 
+      # https://github.com/klakegg/actions-hugo
       - name: Run Hugo
         uses: klakegg/actions-hugo@1.0.0
         with:
           source: ./hugo
+          version: '0.101.0'
           command: --minify --ignoreCache --cleanDestinationDir --gc
 
       # https://github.com/peaceiris/actions-hugo
