@@ -89,6 +89,11 @@ jobs:
           version: '0.101.0'
           command: --minify --ignoreCache --cleanDestinationDir --gc
 
+      # THE PREVIOUS LINE IS FUCKING PISSING ME OFF, IT'S CREATING MIXED CASE FILES
+      - name: Lowercase Everything
+        timeout-minutes: 15
+        run: find ./hugo -depth | xargs -n 1 rename 's/(.*)\/([^\/]*)/$1\/\L$2/' {} \;
+
       # https://github.com/peaceiris/actions-hugo
       # - name: Setup Hugo
       #   uses: peaceiris/actions-hugo@v2.6.0
@@ -115,6 +120,8 @@ jobs:
       # - name: Build
       #   timeout-minutes: 15
       #   run: rm -rf ./hugo/public/* && cd ./hugo && hugo --minify --ignoreCache --cleanDestinationDir --gc
+
+      # Only files if needed: $ find . -depth -type f | xargs -n 1 rename 's/(.*)\/([^\/]*)/$1\/\L$2/' {} \;
 
       - name: List Hugo Public Folder
         timeout-minutes: 15
