@@ -89,18 +89,18 @@ jobs:
           version: '0.101.0'
           command: --minify --ignoreCache --cleanDestinationDir --gc
 
-      - name: Find Mixed Case Files
-        timeout-minutes: 15
-        run: find ./hugo/public -regextype egrep -type f -regex '[^[:lower:]]*'
+      # - name: Find Mixed Case Files
+      #   timeout-minutes: 15
+      #   run: find ./hugo/public -regextype egrep -type f -regex '[^[:lower:]]*'
 
       # THE Run Hugo ACTION IS FUCKING PISSING ME OFF, IT'S CREATING MIXED CASE FILES
-      - name: Lowercase Everything
-        timeout-minutes: 15
-        run: for i in $( find ./hugo/public -type f ); do mv -f $i `echo $i | tr 'A-Z' 'a-z'` || true; done
+      # - name: Lowercase Everything
+      #   timeout-minutes: 15
+      #   run: for i in $( find ./hugo/public -type f ); do mv -f $i `echo $i | tr 'A-Z' 'a-z'` || true; done
 
-      - name: Find Mixed Case Files 2
-        timeout-minutes: 15
-        run: find . -regextype egrep -type f -regex '[^[:lower:]]*'
+      # - name: Find Mixed Case Files 2
+      #   timeout-minutes: 15
+      #   run: find . -regextype egrep -type f -regex '[^[:lower:]]*'
 
       # https://github.com/peaceiris/actions-hugo
       # - name: Setup Hugo
@@ -138,10 +138,8 @@ jobs:
       - name: S3 Sync
         run: aws s3 sync ./hugo/public s3://${{ env.S3_BUCKET_NAME }} --delete --acl bucket-owner-full-control --acl public-read --cache-control max-age=31536000,public
 
-      - name: S3 Sync
-        run: for i in $( aws s3 ls s3://${{ env.S3_BUCKET_NAME }} | awk '{print $4}' ); do aws s3 mv s3://${{ env.S3_BUCKET_NAME }}/$i s3://${{ env.S3_BUCKET_NAME }}/`echo $i | tr 'A-Z' 'a-z'`; done
-
-
+      - name: S3 Lowercase
+        run: for i in $( aws s3 ls --recursive s3://${{ env.S3_BUCKET_NAME }} | grep [A-Z] | awk '{print $4}' ); do aws s3 mv s3://${{ env.S3_BUCKET_NAME }}/$i s3://${{ env.S3_BUCKET_NAME }}/`echo $i | tr 'A-Z' 'a-z'`; done
 
       - name: Cloudfront Invalidate
         run: aws cloudfront create-invalidation --distribution-id ${{ env.CLOUDFRONT_DISTRIBUTION_ID }} --paths "/*"
