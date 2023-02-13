@@ -34,7 +34,7 @@ jobs:
         SLACK_USERNAME: github-action-slack-notify
   deploywebsite:
     name: "Deploy Website"
-    runs-on: ubuntu-latest
+    runs-on: macos-11
     env:
       working-directory: ./gatsby
       node-version: "15.10.0"
