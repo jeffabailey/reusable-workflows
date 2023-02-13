@@ -91,12 +91,12 @@ jobs:
 
       - name: Find Mixed Case Files
         timeout-minutes: 15
-        run: find . -regextype egrep -type f -regex '[^[:lower:]]*'
+        run: find ./hugo/public -regextype egrep -type f -regex '[^[:lower:]]*'
 
       # THE Run Hugo ACTION IS FUCKING PISSING ME OFF, IT'S CREATING MIXED CASE FILES
       - name: Lowercase Everything
         timeout-minutes: 15
-        run: for i in $( find ./hugo -type f ); do mv -f $i `echo $i | tr 'A-Z' 'a-z'`; done
+        run: for i in $( find ./hugo/public -type f ); do mv -f $i `echo $i | tr 'A-Z' 'a-z'` 2>/dev/null; done
 
       - name: Find Mixed Case Files 2
         timeout-minutes: 15
