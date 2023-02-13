@@ -93,6 +93,8 @@ jobs:
         with:
           image: klakegg/hugo:0.101.0
           options: hugo version
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}          
 
       - name: Build
         timeout-minutes: 15
