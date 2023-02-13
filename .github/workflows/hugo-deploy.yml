@@ -88,6 +88,12 @@ jobs:
           hugo-version: 'latest'
           # extended: true
 
+      - name: Run Docker
+        uses: addnab/docker-run-action@v3
+        with:
+          image: klakegg/hugo:0.101.0
+          options: hugo version
+
       - name: Build
         timeout-minutes: 15
         run: rm -rf ./hugo/public/* && cd ./hugo && hugo --minify --ignoreCache --cleanDestinationDir --gc
