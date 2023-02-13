@@ -94,13 +94,15 @@ jobs:
           username: jeffabailey
           password: ^52bZ0RoeTf3
 
+      - name: Docker Pull
+        timeout-minutes: 15
+        run: docker pull klakegg/hugo:0.101.0
+
       - name: Run Docker
         uses: addnab/docker-run-action@v3
         with:
           image: klakegg/hugo:0.101.0
-          options: hugo version
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}          
+          options: hugo version          
 
       - name: Build
         timeout-minutes: 15
