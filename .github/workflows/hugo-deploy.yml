@@ -34,7 +34,7 @@ jobs:
         SLACK_USERNAME: github-action-slack-notify
   deploywebsite:
     name: "Deploy Website"
-    runs-on: macos-11
+    runs-on: ubuntu-latest
     env:
       working-directory: ./gatsby
       node-version: "15.10.0"
@@ -137,6 +137,11 @@ jobs:
 
       - name: S3 Sync
         run: aws s3 sync ./hugo/public s3://${{ env.S3_BUCKET_NAME }} --delete --acl bucket-owner-full-control --acl public-read --cache-control max-age=31536000,public
+
+      - name: S3 Sync
+        run: for i in $( aws s3 ls s3://${{ env.S3_BUCKET_NAME }} | awk '{print $4}' ); do aws s3 mv s3://${{ env.S3_BUCKET_NAME }}/$i s3://${{ env.S3_BUCKET_NAME }}/`echo $i | tr 'A-Z' 'a-z'`; done
+
+
 
       - name: Cloudfront Invalidate
         run: aws cloudfront create-invalidation --distribution-id ${{ env.CLOUDFRONT_DISTRIBUTION_ID }} --paths "/*"
