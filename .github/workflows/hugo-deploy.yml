@@ -96,7 +96,7 @@ jobs:
       # THE Run Hugo ACTION IS FUCKING PISSING ME OFF, IT'S CREATING MIXED CASE FILES
       - name: Lowercase Everything
         timeout-minutes: 15
-        run: for i in $( find ./hugo/public -type f ); do mv -f $i `echo $i | tr 'A-Z' 'a-z'` 2>/dev/null; done
+        run: for i in $( find ./hugo/public -type f ); do mv -f $i `echo $i | tr 'A-Z' 'a-z'` || true; done
 
       - name: Find Mixed Case Files 2
         timeout-minutes: 15
