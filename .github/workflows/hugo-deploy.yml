@@ -108,7 +108,7 @@ jobs:
         uses: peaceiris/actions-hugo@v2.6.0
         with:
           hugo-version: 'latest'
-          # extended: true
+          extended: true
 
       # - name: Docker Login
       #   uses: docker/login-action@v2
