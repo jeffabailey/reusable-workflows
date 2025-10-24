@@ -15,6 +15,10 @@ on:
       site_meta_url:
         required: true
         type: string
+      debug:
+        required: false
+        type: boolean
+        default: false
     secrets:
       aws_access_key_id:
         required: true
@@ -60,6 +64,12 @@ jobs:
           git config --global init.defaultBranch master
  
       # https://github.com/peaceiris/actions-hugo
+      - name: Setup Hugo
+        uses: peaceiris/actions-hugo@v2.6.0
+        with:
+          hugo-version: 'latest'
+          extended: true
+
       - name: Cache Hugo build
         uses: actions/cache@v3
         with:
@@ -69,27 +79,40 @@ jobs:
             ${{ runner.os }}-hugo-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/hugo.toml') }}-
             ${{ runner.os }}-hugo-
 
-      - name: Setup Hugo
-        uses: peaceiris/actions-hugo@v2.6.0
-        with:
-          hugo-version: 'latest'
-          extended: true
-
       - name: Build
         timeout-minutes: 15
-        run: cd ./hugo && hugo --minify --gc
+        run: |
+          cd ./hugo
+          if [ "${{ inputs.debug }}" = "true" ]; then
+            echo "🐛 Debug mode enabled - running Hugo with verbose output"
+            hugo --minify --gc --verbose
+          else
+            hugo --minify --gc
+          fi
 
       # Only files if needed: $ find . -depth -type f | xargs -n 1 rename 's/(.*)\/([^\/]*)/$1\/\L$2/' {} \;
 
 
       - name: S3 Sync
-        run: aws s3 sync ./hugo/public s3://${{ inputs.s3_bucket_name }} --delete --acl bucket-owner-full-control --acl public-read --cache-control max-age=31536000,public
+        run: |
+          if [ "${{ inputs.debug }}" = "true" ]; then
+            echo "🐛 Debug mode enabled - running S3 sync with verbose output"
+            aws s3 sync ./hugo/public s3://${{ inputs.s3_bucket_name }} --delete --acl bucket-owner-full-control --acl public-read --cache-control max-age=31536000,public --debug
+          else
+            aws s3 sync ./hugo/public s3://${{ inputs.s3_bucket_name }} --delete --acl bucket-owner-full-control --acl public-read --cache-control max-age=31536000,public
+          fi
 
       # - name: S3 Lowercase
       #   run: for i in $( aws s3 ls --recursive s3://${{ inputs.s3_bucket_name }} | grep [A-Z] | awk '{print $4}' ); do aws s3 mv s3://${{ inputs.s3_bucket_name }}/$i s3://${{ inputs.s3_bucket_name }}/`echo $i | tr 'A-Z' 'a-z'`; done
 
       - name: Cloudfront Invalidate
-        run: aws cloudfront create-invalidation --distribution-id ${{ inputs.cloudfront_distribution_id }} --paths "/*"
+        run: |
+          if [ "${{ inputs.debug }}" = "true" ]; then
+            echo "🐛 Debug mode enabled - running CloudFront invalidation with verbose output"
+            aws cloudfront create-invalidation --distribution-id ${{ inputs.cloudfront_distribution_id }} --paths "/*" --debug
+          else
+            aws cloudfront create-invalidation --distribution-id ${{ inputs.cloudfront_distribution_id }} --paths "/*"
+          fi
 
       - name: Audit URLs using Lighthouse
         uses: treosh/lighthouse-ci-action@v12
