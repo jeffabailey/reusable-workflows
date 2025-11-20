@@ -70,13 +70,27 @@ jobs:
           hugo-version: 'latest'
           extended: true
 
+      - name: Get Hugo version
+        id: hugo-version
+        run: |
+          cd ./hugo
+          HUGO_VERSION=$(hugo version | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "latest")
+          echo "version=$HUGO_VERSION" >> $GITHUB_OUTPUT
+
+      # Cache Hugo's processed resources (_gen directory)
+      # Cache key includes Hugo version and all files that affect the build:
+      # - Config files (hugo.toml, config.toml)
+      # - Content, layouts, themes, assets, data, archetypes, static files
+      # Hugo's incremental build will only rebuild changed resources, but we
+      # invalidate cache when any source file changes to ensure correctness.
       - name: Cache Hugo build
         uses: actions/cache@v3
         with:
           path: ./hugo/resources/_gen
-          key: ${{ runner.os }}-hugo-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/hugo.toml') }}-${{ hashFiles('content/**') }}
+          key: ${{ runner.os }}-hugo-${{ steps.hugo-version.outputs.version }}-${{ hashFiles('hugo/hugo.toml', 'hugo/config.toml') }}-${{ hashFiles('hugo/content/**', 'hugo/layouts/**', 'hugo/themes/**', 'hugo/assets/**', 'hugo/data/**', 'hugo/archetypes/**', 'hugo/static/**') }}
           restore-keys: |
-            ${{ runner.os }}-hugo-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/hugo.toml') }}-
+            ${{ runner.os }}-hugo-${{ steps.hugo-version.outputs.version }}-${{ hashFiles('hugo/hugo.toml', 'hugo/config.toml') }}-
+            ${{ runner.os }}-hugo-${{ steps.hugo-version.outputs.version }}-
             ${{ runner.os }}-hugo-
 
       - name: Build
