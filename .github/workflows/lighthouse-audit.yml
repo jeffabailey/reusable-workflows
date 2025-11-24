@@ -24,12 +24,15 @@ jobs:
     name: "Lighthouse Audit"
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Audit URLs using Lighthouse
         uses: treosh/lighthouse-ci-action@v12
         with:
           urls: |
             ${{ inputs.site_meta_url }}
-          budgetPath: ${{ inputs.budget_path != '' && inputs.budget_path || './budget.json' }}
+          budgetPath: ${{ inputs.budget_path != '' && inputs.budget_path || '' }}
           uploadArtifacts: ${{ inputs.upload_artifacts }}
           temporaryPublicStorage: ${{ inputs.temporary_public_storage }}
 
