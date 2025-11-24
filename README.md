@@ -11,19 +11,36 @@ A comprehensive Hugo deployment workflow that builds and deploys Hugo sites to A
 - Hugo build with caching
 - AWS S3 sync with proper ACLs
 - CloudFront cache invalidation
-- Lighthouse performance auditing
 - Automatic cleanup
 
 **Inputs:**
 - `website_repository` (required): The repository containing the Hugo site
 - `s3_bucket_name` (required): S3 bucket name for deployment
 - `cloudfront_distribution_id` (required): CloudFront distribution ID for cache invalidation
-- `site_meta_url` (required): Base URL of the site for Lighthouse auditing
+- `debug` (optional): Enable debug mode for verbose output (default: false)
 
 **Secrets:**
 - `aws_access_key_id` (required): AWS access key for S3 and CloudFront operations
 - `aws_secret_access_key` (required): AWS secret key for S3 and CloudFront operations
 - `access_token` (required): GitHub token for repository checkout
+
+### `lighthouse-audit.yml`
+A reusable workflow for running Lighthouse performance audits on websites. Designed to be run on a schedule or manually, separate from deployment workflows.
+
+**Features:**
+- Lighthouse CI performance auditing
+- Performance budget testing
+- Artifact uploads
+- Temporary public storage for reports
+
+**Inputs:**
+- `site_meta_url` (required): Base URL of the site to audit
+- `budget_path` (optional): Path to budget.json file (default: "./budget.json")
+- `upload_artifacts` (optional): Upload results as artifacts (default: true)
+- `temporary_public_storage` (optional): Upload report to temporary public storage (default: true)
+
+**Secrets:**
+- None required
 
 ### `generate-diagrams.yml`
 Generates diagrams from Mermaid source files and commits them to the repository.
@@ -48,11 +65,27 @@ jobs:
       website_repository: owner/repo-name
       s3_bucket_name: "my-bucket"
       cloudfront_distribution_id: "E1234567890ABC"
-      site_meta_url: "https://example.com/"
     secrets:
       aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
       aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       access_token: ${{ secrets.ACCESS_TOKEN }}
+```
+
+### Lighthouse Audit (Scheduled)
+```yaml
+name: Lighthouse Audit
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  lighthouse:
+    uses: jeffabailey/reusable-workflows/.github/workflows/lighthouse-audit.yml@master
+    with:
+      site_meta_url: "https://example.com/"
+      budget_path: "./budget.json" # Optional
 ```
 
 ## Testing and Validation

@@ -1,0 +1,35 @@
+name: Lighthouse Audit
+
+on:
+  workflow_call:
+    inputs:
+      site_meta_url:
+        required: true
+        type: string
+      budget_path:
+        required: false
+        type: string
+        default: ""
+      upload_artifacts:
+        required: false
+        type: boolean
+        default: true
+      temporary_public_storage:
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  lighthouse:
+    name: "Lighthouse Audit"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Audit URLs using Lighthouse
+        uses: treosh/lighthouse-ci-action@v12
+        with:
+          urls: |
+            ${{ inputs.site_meta_url }}
+          budgetPath: ${{ inputs.budget_path != '' && inputs.budget_path || './budget.json' }}
+          uploadArtifacts: ${{ inputs.upload_artifacts }}
+          temporaryPublicStorage: ${{ inputs.temporary_public_storage }}
+
