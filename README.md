@@ -84,7 +84,7 @@ jobs:
   lighthouse:
     uses: jeffabailey/reusable-workflows/.github/workflows/lighthouse-audit.yml@master
     with:
-      site_meta_url: "https://example.com/"
+      site_meta_url: "https://jeffbailey.us"
       budget_path: "./budget.json" # Optional
 ```
 

@@ -27,7 +27,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Mock Lighthouse Audit (Local Testing)
+        if: env.ACT == 'true'
+        run: |
+          echo "🚫 Mocking Lighthouse audit for local testing (ACT)"
+          echo "URLs that would be audited: ${{ inputs.site_meta_url }}"
+          echo "✅ Lighthouse audit mocked successfully"
+
       - name: Audit URLs using Lighthouse
+        if: env.ACT != 'true'
         uses: treosh/lighthouse-ci-action@v12
         with:
           urls: ${{ inputs.site_meta_url }}

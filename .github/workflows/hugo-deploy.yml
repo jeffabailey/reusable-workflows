@@ -23,16 +23,16 @@ on:
         required: true
       access_token:
         required: true
+
 jobs:
   deploywebsite:
     name: "Deploy Website"
     runs-on: ubuntu-latest
+
+    # Hugo's own cache dir (for modules / remote resources)
     env:
-      working-directory: ./gatsby
-      node-version: "15.10.0"
-    strategy:
-      matrix:
-        node-version: [15.x]
+      HUGO_CACHEDIR: /tmp/hugo_cache
+
     steps:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -46,54 +46,62 @@ jobs:
         with:
           repository: ${{ inputs.website_repository }}
           token: ${{ secrets.access_token }}
+          fetch-depth: 1
 
-
-      # https://github.com/tcort/markdown-link-check
-      # - name: Check Links
-      #   uses: gaurav-nelson/github-action-markdown-link-check@v1
-
-      # https://github.com/xom9ikk/dotenv
+      # Load env vars from .env (same as before)
       - name: Simple Dotenv
         uses: xom9ikk/dotenv@v1.0.2
+        with:
+          path: ./
 
       - name: Set Default Git Branch
-        run: |
-          git config --global init.defaultBranch master
- 
-      # https://github.com/peaceiris/actions-hugo
+        run: git config --global init.defaultBranch master
+
+      # Setup Hugo (pin to the version you're actually using from the log)
       - name: Setup Hugo
         uses: peaceiris/actions-hugo@v2.6.0
         with:
-          hugo-version: 'latest'
+          hugo-version: '0.152.2'
           extended: true
 
       - name: Get Hugo version
         id: hugo-version
+        working-directory: ./hugo
         run: |
-          cd ./hugo
           HUGO_VERSION=$(hugo version | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "latest")
-          echo "version=$HUGO_VERSION" >> $GITHUB_OUTPUT
+          echo "version=$HUGO_VERSION" >> "$GITHUB_OUTPUT"
 
       # Cache Hugo's processed resources (_gen directory)
-      # Cache key includes Hugo version and all files that affect the build:
-      # - Config files (hugo.toml, config.toml)
-      # - Content, layouts, themes, assets, data, archetypes, static files
-      # Hugo's incremental build will only rebuild changed resources, but we
-      # invalidate cache when any source file changes to ensure correctness.
-      - name: Cache Hugo build
-        uses: actions/cache@v3
+      # Keyed only on Hugo version + config/layouts/themes/assets so
+      # normal content edits don't invalidate the cache.
+      - name: Cache Hugo resources
+        uses: actions/cache@v4
         with:
           path: ./hugo/resources/_gen
-          key: ${{ runner.os }}-hugo-${{ steps.hugo-version.outputs.version }}-${{ hashFiles('hugo/hugo.toml', 'hugo/config.toml') }}-${{ hashFiles('hugo/content/**', 'hugo/layouts/**', 'hugo/themes/**', 'hugo/assets/**', 'hugo/data/**', 'hugo/archetypes/**', 'hugo/static/**') }}
+          key: >
+            ${{ runner.os }}-hugo-resources-${{ steps.hugo-version.outputs.version }}-
+            ${{ hashFiles('hugo/hugo.toml', 'hugo/config.*', 'hugo/layouts/**', 'hugo/themes/**', 'hugo/assets/**') }}
           restore-keys: |
-            ${{ runner.os }}-hugo-${{ steps.hugo-version.outputs.version }}-${{ hashFiles('hugo/hugo.toml', 'hugo/config.toml') }}-
-            ${{ runner.os }}-hugo-${{ steps.hugo-version.outputs.version }}-
-            ${{ runner.os }}-hugo-
+            ${{ runner.os }}-hugo-resources-${{ steps.hugo-version.outputs.version }}-
+            ${{ runner.os }}-hugo-resources-
+
+      # Optional: cache Hugo module / remote resource cache
+      # Safe even if you aren't using modules; it will just be small.
+      - name: Cache Hugo module cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.HUGO_CACHEDIR }}
+          key: >
+            ${{ runner.os }}-hugo-mod-${{ steps.hugo-version.outputs.version }}-
+            ${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-hugo-mod-${{ steps.hugo-version.outputs.version }}-
+            ${{ runner.os }}-hugo-mod-
 
       - name: Build
+        working-directory: ./hugo
         timeout-minutes: 15
         run: |
-          cd ./hugo
           if [ "${{ inputs.debug }}" = "true" ]; then
             echo "🐛 Debug mode enabled - running Hugo with verbose output"
             hugo --minify --gc --verbose
@@ -101,29 +109,35 @@ jobs:
             hugo --minify --gc
           fi
 
-      # Only files if needed: $ find . -depth -type f | xargs -n 1 rename 's/(.*)\/([^\/]*)/$1\/\L$2/' {} \;
-
-
       - name: S3 Sync
         run: |
           if [ "${{ inputs.debug }}" = "true" ]; then
             echo "🐛 Debug mode enabled - running S3 sync with verbose output"
-            aws s3 sync ./hugo/public s3://${{ inputs.s3_bucket_name }} --delete --acl bucket-owner-full-control --acl public-read --cache-control max-age=31536000,public --debug
+            aws s3 sync ./hugo/public s3://${{ inputs.s3_bucket_name }} \
+              --delete \
+              --acl public-read \
+              --cache-control max-age=31536000,public
           else
-            aws s3 sync ./hugo/public s3://${{ inputs.s3_bucket_name }} --delete --acl bucket-owner-full-control --acl public-read --cache-control max-age=31536000,public
+            aws s3 sync ./hugo/public s3://${{ inputs.s3_bucket_name }} \
+              --delete \
+              --acl public-read \
+              --cache-control max-age=31536000,public \
+              --only-show-errors
           fi
-
-      # - name: S3 Lowercase
-      #   run: for i in $( aws s3 ls --recursive s3://${{ inputs.s3_bucket_name }} | grep [A-Z] | awk '{print $4}' ); do aws s3 mv s3://${{ inputs.s3_bucket_name }}/$i s3://${{ inputs.s3_bucket_name }}/`echo $i | tr 'A-Z' 'a-z'`; done
 
       - name: Cloudfront Invalidate
         run: |
           if [ "${{ inputs.debug }}" = "true" ]; then
             echo "🐛 Debug mode enabled - running CloudFront invalidation with verbose output"
-            aws cloudfront create-invalidation --distribution-id ${{ inputs.cloudfront_distribution_id }} --paths "/*" --debug
+            aws cloudfront create-invalidation \
+              --distribution-id ${{ inputs.cloudfront_distribution_id }} \
+              --paths "/*" \
+              --debug
           else
-            aws cloudfront create-invalidation --distribution-id ${{ inputs.cloudfront_distribution_id }} --paths "/*"
+            aws cloudfront create-invalidation \
+              --distribution-id ${{ inputs.cloudfront_distribution_id }} \
+              --paths "/*"
           fi
 
       - name: Cleanup
-        uses: rtCamp/action-cleanup@master          
+        uses: rtCamp/action-cleanup@master
