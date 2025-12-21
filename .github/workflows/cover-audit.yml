@@ -1,0 +1,153 @@
+name: Social Cover Audit
+
+on:
+  workflow_call:
+    inputs:
+      page_url:
+        description: "The URL of the page to validate Open Graph tags for"
+        required: true
+        type: string
+
+jobs:
+  cover_audit:
+    name: "Social Cover Audit"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mock Social Cover Audit (Local Testing)
+        if: env.ACT == 'true'
+        run: |
+          echo "🚫 Mocking social cover audit for local testing (ACT)"
+          echo "Page URL: ${{ inputs.page_url }}"
+          echo "✅ Social cover audit mocked successfully"
+
+      - name: Audit social cover (Open Graph + validator)
+        if: env.ACT != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+          import sys
+          from html.parser import HTMLParser
+          from urllib.error import HTTPError
+          from urllib.parse import quote, urljoin, urlparse
+          from urllib.request import Request, urlopen
+          
+          PAGE_URL = os.environ["PAGE_URL"].strip()
+          SUMMARY = os.environ.get("GITHUB_STEP_SUMMARY", "")
+          
+          def die(msg: str) -> None:
+              print(msg, file=sys.stderr)
+              raise SystemExit(1)
+          
+          def one_line(s: str) -> str:
+              return " ".join((s or "").replace("\r", " ").replace("\n", " ").split()).strip()
+          
+          parsed = urlparse(PAGE_URL)
+          if parsed.scheme not in ("http", "https"):
+              die(f"Invalid page_url (must be http/https): {PAGE_URL}")
+          
+          validator_url = "https://orcascan.com/tools/open-graph-validator?url=" + quote(PAGE_URL, safe="")
+          
+          class OGParser(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.og = {}
+              def handle_starttag(self, tag, attrs):
+                  if tag.lower() != "meta":
+                      return
+                  a = {k.lower(): (v or "") for k, v in attrs}
+                  prop = a.get("property") or a.get("name")
+                  if not prop:
+                      return
+                  prop = prop.strip().lower()
+                  if not prop.startswith("og:"):
+                      return
+                  content = (a.get("content") or "").strip()
+                  if content:
+                      self.og.setdefault(prop, content)
+          
+          def fetch_text(url: str, accept: str) -> str:
+              req = Request(
+                  url,
+                  headers={
+                      "User-Agent": "cover-audit (GitHub Actions)",
+                      "Accept": accept,
+                  },
+              )
+              with urlopen(req, timeout=30) as resp:
+                  return resp.read().decode("utf-8", errors="replace")
+          
+          html = fetch_text(PAGE_URL, "text/html,application/xhtml+xml")
+          p = OGParser()
+          p.feed(html)
+          og = p.og
+          
+          og_title = one_line(og.get("og:title", ""))[:500]
+          og_description = one_line(og.get("og:description", ""))[:800]
+          og_url = one_line(og.get("og:url", ""))[:800]
+          og_image_raw = one_line(og.get("og:image", ""))[:1200]
+          og_image_url = one_line(urljoin(PAGE_URL, og_image_raw) if og_image_raw else "")[:1200]
+          
+          missing = [k for k, v in {
+              "og:title": og_title,
+              "og:description": og_description,
+              "og:url": og_url,
+              "og:image": og_image_raw,
+          }.items() if not v]
+          if missing:
+              die("Missing required Open Graph tags: " + ", ".join(missing))
+          
+          # Verify og:image resolves to a reachable image.
+          def request(url: str, method: str):
+              return Request(
+                  url,
+                  method=method,
+                  headers={
+                      "User-Agent": "cover-audit (GitHub Actions)",
+                      "Accept": "image/*,*/*;q=0.8",
+                  },
+              )
+          
+          try:
+              resp = urlopen(request(og_image_url, "HEAD"), timeout=30)
+              status = getattr(resp, "status", 200)
+              headers = resp.headers
+          except HTTPError as e:
+              if e.code in (403, 405):
+                  resp = urlopen(request(og_image_url, "GET"), timeout=30)
+                  status = getattr(resp, "status", 200)
+                  headers = resp.headers
+                  resp.read(1024)
+              else:
+                  raise
+          
+          if status < 200 or status >= 300:
+              die(f"og:image returned non-2xx status: {status} ({og_image_url})")
+          
+          content_type = (headers.get("Content-Type") or "").split(";")[0].strip().lower()
+          if not content_type.startswith("image/"):
+              die(f"og:image Content-Type is not an image: {content_type or '(missing)'} ({og_image_url})")
+          
+          # Ask OrcaScan validator for an additional safety net.
+          validator_html = fetch_text(validator_url, "text/html,application/xhtml+xml")
+          ok = "valid: Your page contains the correct Open Graph tags." in validator_html
+          if not ok:
+              m = re.search(r"(valid:.*?|invalid:.*?)(?:</|\\n)", validator_html, flags=re.IGNORECASE | re.DOTALL)
+              hint = one_line(m.group(1))[:300] if m else "Could not locate a valid/invalid status string in validator HTML."
+              die("OrcaScan validator did not report 'valid'. Hint: " + hint + f" (Validator URL: {validator_url})")
+          
+          # Write job summary with the link.
+          if SUMMARY:
+              with open(SUMMARY, "a", encoding="utf-8") as f:
+                  f.write("## Social cover audit\\n\\n")
+                  f.write(f"- **Page URL**: {PAGE_URL}\\n")
+                  f.write(f"- **Validator URL**: {validator_url}\\n")
+                  f.write(f"- **og:image (resolved)**: {og_image_url}\\n")
+          
+          print(f"✅ Social cover audit passed. Validator: {validator_url}")
+          PY
+        env:
+          PAGE_URL: ${{ inputs.page_url }}
+
