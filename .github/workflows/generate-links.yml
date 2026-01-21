@@ -51,10 +51,9 @@ jobs:
       - name: Set Default Git Branch
         run: git config --global init.defaultBranch master
 
-      - name: Setup GitHub CLI
-        uses: cli/cli@v2
-        with:
-          token: ${{ secrets.github_token }}
+      - name: Authenticate GitHub CLI
+        run: |
+          echo "${{ secrets.github_token }}" | gh auth login --with-token
       
       - name: Verify GitHub CLI Copilot Chat
         run: |
