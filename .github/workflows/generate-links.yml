@@ -1,0 +1,141 @@
+name: Generate Markdown Links
+
+on:
+  workflow_call:
+    inputs:
+      website_repository:
+        required: true
+        type: string
+      content_folder:
+        required: false
+        type: string
+        default: "content/blog"
+      prompt_file:
+        required: false
+        type: string
+        default: ".cursor/seo_optimize.md"
+      custom_prompt:
+        required: false
+        type: string
+        description: "Custom prompt to override the default prompt file"
+      debug:
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      access_token:
+        required: true
+      github_token:
+        required: true
+        description: "GitHub token with Copilot API access"
+
+jobs:
+  generateLinks:
+    name: "Generate Markdown Links"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout reusable workflows
+        uses: actions/checkout@v4
+        with:
+          path: reusable-workflows
+
+      - name: Checkout website repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.website_repository }}
+          token: ${{ secrets.access_token }}
+          fetch-depth: 1
+          path: website
+
+      - name: Set Default Git Branch
+        run: git config --global init.defaultBranch master
+
+      - name: Setup GitHub CLI
+        uses: cli/cli@v2
+        with:
+          token: ${{ secrets.github_token }}
+      
+      - name: Verify GitHub CLI Copilot Chat
+        run: |
+          if gh copilot chat --help > /dev/null 2>&1; then
+            echo "✅ GitHub CLI Copilot Chat is available"
+          else
+            echo "⚠️  GitHub CLI Copilot Chat may not be available"
+            echo "   This workflow requires GitHub Copilot subscription and gh CLI v2.40.0+"
+            echo "   The workflow will attempt to proceed but may fail if Copilot Chat is unavailable"
+          fi
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pyyaml requests
+
+      - name: Read default prompt
+        id: read-prompt
+        working-directory: ./website
+        run: |
+          if [ -f "${{ inputs.prompt_file }}" ]; then
+            PROMPT=$(cat "${{ inputs.prompt_file }}")
+            # Use multiline output to preserve formatting
+            {
+              echo 'prompt<<EOF'
+              cat "${{ inputs.prompt_file }}"
+              echo 'EOF'
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "prompt=No prompt file found at ${{ inputs.prompt_file }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Copy script to website repository
+        run: |
+          mkdir -p website/.github/scripts/generate-links
+          cp -r reusable-workflows/.github/scripts/generate-links/* website/.github/scripts/generate-links/
+          chmod +x website/.github/scripts/generate-links/generate_links.py
+
+      - name: Generate markdown links
+        working-directory: ./website
+        env:
+          GITHUB_TOKEN: ${{ secrets.github_token }}
+          CONTENT_FOLDER: ${{ inputs.content_folder }}
+          CUSTOM_PROMPT: ${{ inputs.custom_prompt }}
+          DEFAULT_PROMPT: ${{ steps.read-prompt.outputs.prompt }}
+          DEBUG: ${{ inputs.debug }}
+        run: |
+          python3 .github/scripts/generate-links/generate_links.py
+
+      - name: Configure Git
+        working-directory: ./website
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Check for changes
+        id: check-changes
+        working-directory: ./website
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit changes
+        if: steps.check-changes.outputs.changes == 'true'
+        working-directory: ./website
+        run: |
+          git add -A
+          git commit -m "chore: generate markdown links via GitHub Copilot"
+          git push
+
+      - name: Summary
+        run: |
+          if [ "${{ steps.check-changes.outputs.changes }}" == "true" ]; then
+            echo "✅ Successfully generated and committed markdown links"
+          else
+            echo "ℹ️ No changes were made to markdown files"
+          fi

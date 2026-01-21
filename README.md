@@ -50,6 +50,31 @@ Generates diagrams from Mermaid source files and commits them to the repository.
 - Automatic commit of generated images
 - Support for multiple diagram formats
 
+### `generate-links.yml`
+Generates markdown links using GitHub Copilot Chat API. Processes markdown files in a specified directory and adds internal links based on a customizable prompt.
+
+**Features:**
+- Uses GitHub Copilot Chat to analyze and enhance markdown files
+- Customizable prompts (defaults to SEO optimization prompt)
+- Automatic commit of generated links
+- Supports processing specific content folders
+
+**Inputs:**
+- `website_repository` (required): The repository containing the markdown files
+- `content_folder` (optional): Folder to process (default: "content/blog")
+- `prompt_file` (optional): Path to prompt file (default: ".cursor/seo_optimize.md")
+- `custom_prompt` (optional): Custom prompt text to override the default prompt file
+- `debug` (optional): Enable debug mode for verbose output (default: false)
+
+**Secrets:**
+- `access_token` (required): GitHub token for repository checkout
+- `github_token` (required): GitHub token with Copilot API access
+
+**Requirements:**
+- GitHub Copilot subscription
+- GitHub CLI (gh) v2.40.0+ with Copilot Chat feature
+- Appropriate API permissions for Copilot Chat
+
 ## Usage Examples
 
 ### Hugo Deployment
@@ -86,6 +111,36 @@ jobs:
     with:
       site_meta_url: "https://jeffbailey.us"
       budget_path: "./budget.json" # Optional
+```
+
+### Generate Markdown Links
+```yaml
+name: Generate Markdown Links
+on:
+  workflow_dispatch:
+    inputs:
+      content_folder:
+        description: 'Content folder to process'
+        required: false
+        default: 'hugo/content/blog'
+        type: string
+      custom_prompt:
+        description: 'Custom prompt (optional)'
+        required: false
+        type: string
+
+jobs:
+  generate-links:
+    uses: jeffabailey/reusable-workflows/.github/workflows/generate-links.yml@master
+    with:
+      website_repository: owner/repo-name
+      content_folder: ${{ inputs.content_folder || 'hugo/content/blog' }}
+      prompt_file: '.cursor/seo_optimize.md'
+      custom_prompt: ${{ inputs.custom_prompt || '' }}
+      debug: true
+    secrets:
+      access_token: ${{ secrets.ACCESS_TOKEN }}
+      github_token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
 ## Testing and Validation

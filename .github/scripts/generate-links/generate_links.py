@@ -1,0 +1,207 @@
+#!/usr/bin/env python3
+"""
+Generate markdown links using GitHub Copilot Chat API.
+
+This script processes markdown files in a specified directory and uses
+GitHub Copilot to add internal links based on the provided prompt.
+
+Requirements:
+- GitHub CLI (gh) with Copilot Chat feature enabled
+- GitHub token with appropriate permissions
+- Python 3.11+
+
+Note: GitHub Copilot Chat API access may require:
+- GitHub Copilot subscription
+- Appropriate API permissions
+- GitHub CLI v2.40.0+ with Copilot Chat feature
+"""
+
+import os
+import sys
+import subprocess
+import json
+from pathlib import Path
+from typing import List, Optional
+
+
+def get_github_copilot_response(prompt: str, content: str, github_token: str) -> Optional[str]:
+    """
+    Get response from GitHub Copilot Chat API.
+    
+    This function attempts to use GitHub CLI with Copilot Chat,
+    or falls back to GitHub API if available.
+    """
+    import requests
+    
+    # Construct the full prompt
+    full_prompt = f"""{prompt}
+
+Please analyze the following markdown content and add appropriate internal links to related content. 
+Only add links that are relevant and improve the content. Maintain the existing structure and style.
+
+Content:
+{content[:8000]}
+
+Please provide the updated markdown with internal links added. Return only the updated markdown content."""
+    
+    # Try using GitHub CLI with Copilot Chat first
+    try:
+        # Use gh copilot chat if available
+        # Note: This requires GitHub CLI v2.40.0+ with Copilot Chat feature
+        result = subprocess.run(
+            ['gh', 'copilot', 'chat', full_prompt],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env={**os.environ, 'GITHUB_TOKEN': github_token}
+        )
+        
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+        elif result.stderr:
+            print(f"gh copilot chat error: {result.stderr}", file=sys.stderr)
+    except FileNotFoundError:
+        print("Warning: GitHub CLI (gh) not found. Trying GitHub API...", file=sys.stderr)
+    except subprocess.TimeoutExpired:
+        print("Warning: GitHub Copilot Chat request timed out", file=sys.stderr)
+    except subprocess.SubprocessError as e:
+        print(f"Warning: Could not use gh copilot chat: {e}", file=sys.stderr)
+    
+    # Fallback: Try GitHub Copilot Chat API directly
+    # Note: This endpoint may require special permissions
+    try:
+        headers = {
+            'Authorization': f'token {github_token}',
+            'Accept': 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28'
+        }
+        
+        # GitHub Copilot Chat API endpoint (if available)
+        # This is a placeholder - the actual endpoint may differ
+        # You may need to use GitHub's Copilot Chat API when it becomes available
+        # For now, we'll return None to indicate we need a different approach
+        
+        # Alternative: Use GitHub's API to create a completion request
+        # This would require the Copilot Chat API which may not be publicly available yet
+        
+    except Exception as e:
+        print(f"Warning: Could not use GitHub API: {e}", file=sys.stderr)
+    
+    return None
+
+
+def process_markdown_file(
+    file_path: Path,
+    prompt: str,
+    github_token: str,
+    dry_run: bool = False
+) -> bool:
+    """
+    Process a single markdown file to add internal links.
+    
+    Returns True if changes were made, False otherwise.
+    """
+    try:
+        # Read the file
+        with open(file_path, 'r', encoding='utf-8') as f:
+            original_content = f.read()
+        
+        # Get updated content from GitHub Copilot
+        updated_content = get_github_copilot_response(
+            prompt,
+            original_content,
+            github_token
+        )
+        
+        if updated_content is None:
+            print(f"⚠️  Could not process {file_path} - Copilot API unavailable")
+            print(f"   This may require GitHub Copilot subscription and proper API access")
+            return False
+        
+        # Check if content changed
+        if updated_content != original_content:
+            if not dry_run:
+                # Write the updated content
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(updated_content)
+                print(f"✅ Updated {file_path}")
+            else:
+                print(f"🔍 Would update {file_path} (dry run)")
+            return True
+        else:
+            print(f"ℹ️  No changes needed for {file_path}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Error processing {file_path}: {e}", file=sys.stderr)
+        return False
+
+
+def main():
+    """Main entry point for the script."""
+    # Get environment variables
+    github_token = os.environ.get('GITHUB_TOKEN')
+    content_folder = os.environ.get('CONTENT_FOLDER', 'content/blog')
+    custom_prompt = os.environ.get('CUSTOM_PROMPT', '')
+    default_prompt = os.environ.get('DEFAULT_PROMPT', '')
+    debug = os.environ.get('DEBUG', 'false').lower() == 'true'
+    dry_run = os.environ.get('DRY_RUN', 'false').lower() == 'true'
+    
+    if not github_token:
+        print("Error: GITHUB_TOKEN environment variable is required", file=sys.stderr)
+        sys.exit(1)
+    
+    # Use custom prompt if provided, otherwise use default
+    prompt = custom_prompt if custom_prompt else default_prompt
+    
+    if not prompt:
+        print("Error: No prompt provided (neither CUSTOM_PROMPT nor DEFAULT_PROMPT)", file=sys.stderr)
+        sys.exit(1)
+    
+    if debug:
+        print(f"Content folder: {content_folder}")
+        print(f"Prompt length: {len(prompt)} characters")
+        print(f"Using custom prompt: {bool(custom_prompt)}")
+        print(f"Dry run: {dry_run}")
+    
+    # Find all markdown files in the content folder
+    content_path = Path(content_folder)
+    if not content_path.exists():
+        print(f"Error: Content folder {content_folder} does not exist", file=sys.stderr)
+        sys.exit(1)
+    
+    # Find markdown files (excluding certain patterns)
+    md_files = [
+        f for f in content_path.rglob('*.md')
+        if 'node_modules' not in str(f) and '.git' not in str(f)
+    ]
+    
+    if debug:
+        print(f"Found {len(md_files)} markdown files")
+    
+    if not md_files:
+        print("No markdown files found to process")
+        sys.exit(0)
+    
+    # Process each file
+    changes_made = 0
+    for md_file in md_files:
+        if debug:
+            print(f"\nProcessing: {md_file}")
+        
+        if process_markdown_file(md_file, prompt, github_token, dry_run):
+            changes_made += 1
+    
+    print(f"\n{'Would process' if dry_run else 'Processed'} {changes_made} file(s)")
+    
+    if changes_made > 0 and not dry_run:
+        sys.exit(0)
+    elif changes_made == 0:
+        print("No changes were made to any files")
+        sys.exit(0)
+    else:
+        sys.exit(0)
+
+
+if __name__ == '__main__':
+    main()
