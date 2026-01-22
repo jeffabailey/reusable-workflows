@@ -9,7 +9,8 @@ on:
       content_folder:
         required: false
         type: string
-        default: "content/blog"
+        default: "hugo/content/blog"
+        description: "Path to content folder relative to repository root (e.g., 'hugo/content/blog' or 'content/blog')"
       prompt_file:
         required: false
         type: string
@@ -78,23 +79,48 @@ jobs:
         id: read-prompt
         working-directory: ./website
         run: |
-          if [ -f "${{ inputs.prompt_file }}" ]; then
-            PROMPT=$(cat "${{ inputs.prompt_file }}")
+          PROMPT_FILE="${{ inputs.prompt_file }}"
+          if [ -f "$PROMPT_FILE" ]; then
             # Use multiline output to preserve formatting
             {
               echo 'prompt<<EOF'
-              cat "${{ inputs.prompt_file }}"
+              cat "$PROMPT_FILE"
               echo 'EOF'
             } >> "$GITHUB_OUTPUT"
+            echo "✅ Successfully read prompt from $PROMPT_FILE"
           else
-            echo "prompt=No prompt file found at ${{ inputs.prompt_file }}" >> "$GITHUB_OUTPUT"
+            echo "⚠️  Prompt file not found at $PROMPT_FILE"
+            echo "   Current directory: $(pwd)"
+            echo "   Available files in .cursor/:"
+            ls -la .cursor/ 2>/dev/null || echo "   .cursor/ directory does not exist"
+            echo "prompt=No prompt file found at $PROMPT_FILE" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Copy script to website repository
         run: |
+          # Verify source directory exists
+          if [ ! -d "reusable-workflows/.github/scripts/generate-links" ]; then
+            echo "Error: Script directory not found at reusable-workflows/.github/scripts/generate-links"
+            echo "Listing reusable-workflows directory:"
+            ls -la reusable-workflows/ || true
+            echo "Listing reusable-workflows/.github directory:"
+            ls -la reusable-workflows/.github/ || true
+            echo "Listing reusable-workflows/.github/scripts directory:"
+            ls -la reusable-workflows/.github/scripts/ || true
+            exit 1
+          fi
+          # Create destination directory
           mkdir -p website/.github/scripts/generate-links
-          cp -r reusable-workflows/.github/scripts/generate-links/* website/.github/scripts/generate-links/
-          chmod +x website/.github/scripts/generate-links/generate_links.py
+          # Copy all files from source to destination
+          cp -r reusable-workflows/.github/scripts/generate-links/. website/.github/scripts/generate-links/
+          # Make script executable
+          if [ -f "website/.github/scripts/generate-links/generate_links.py" ]; then
+            chmod +x website/.github/scripts/generate-links/generate_links.py
+          else
+            echo "Error: generate_links.py not found after copy"
+            exit 1
+          fi
+          echo "✅ Successfully copied script to website repository"
 
       - name: Generate markdown links
         working-directory: ./website
@@ -128,8 +154,8 @@ jobs:
         working-directory: ./website
         run: |
           git add -A
-          git commit -m "chore: generate markdown links via GitHub Copilot"
-          git push
+          git commit -m "chore: generate markdown links via GitHub Copilot" || exit 0
+          git push || echo "Warning: Failed to push changes. This may be expected if the branch is protected."
 
       - name: Summary
         run: |

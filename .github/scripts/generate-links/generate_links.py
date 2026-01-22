@@ -154,8 +154,10 @@ def main():
     # Use custom prompt if provided, otherwise use default
     prompt = custom_prompt if custom_prompt else default_prompt
     
-    if not prompt:
+    if not prompt or prompt.strip() == "" or prompt == "No prompt file found":
         print("Error: No prompt provided (neither CUSTOM_PROMPT nor DEFAULT_PROMPT)", file=sys.stderr)
+        print(f"  CUSTOM_PROMPT: {repr(custom_prompt)}", file=sys.stderr)
+        print(f"  DEFAULT_PROMPT length: {len(default_prompt)}", file=sys.stderr)
         sys.exit(1)
     
     if debug:
@@ -185,16 +187,33 @@ def main():
     
     # Process each file
     changes_made = 0
+    errors = 0
     for md_file in md_files:
         if debug:
             print(f"\nProcessing: {md_file}")
         
-        if process_markdown_file(md_file, prompt, github_token, dry_run):
-            changes_made += 1
+        try:
+            if process_markdown_file(md_file, prompt, github_token, dry_run):
+                changes_made += 1
+        except Exception as e:
+            errors += 1
+            print(f"❌ Failed to process {md_file}: {e}", file=sys.stderr)
+            if not debug:
+                # In non-debug mode, continue processing other files
+                continue
+            else:
+                # In debug mode, show full traceback
+                import traceback
+                traceback.print_exc()
     
     print(f"\n{'Would process' if dry_run else 'Processed'} {changes_made} file(s)")
+    if errors > 0:
+        print(f"⚠️  {errors} file(s) had errors during processing", file=sys.stderr)
     
-    if changes_made > 0 and not dry_run:
+    # Exit with error if there were processing errors
+    if errors > 0:
+        sys.exit(1)
+    elif changes_made > 0 and not dry_run:
         sys.exit(0)
     elif changes_made == 0:
         print("No changes were made to any files")
