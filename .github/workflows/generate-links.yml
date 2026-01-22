@@ -39,6 +39,9 @@ jobs:
       - name: Checkout reusable workflows
         uses: actions/checkout@v4
         with:
+          repository: jeffabailey/reusable-workflows
+          token: ${{ secrets.access_token }}
+          fetch-depth: 1
           path: reusable-workflows
 
       - name: Checkout website repository
