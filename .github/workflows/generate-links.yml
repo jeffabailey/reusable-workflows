@@ -40,6 +40,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: jeffabailey/reusable-workflows
+          # Using access_token ensures access even if repo is private
+          # Note: 500 errors are transient GitHub issues and will auto-retry
           token: ${{ secrets.access_token }}
           fetch-depth: 1
           path: reusable-workflows
@@ -55,6 +57,31 @@ jobs:
       - name: Set Default Git Branch
         run: git config --global init.defaultBranch master
 
+      - name: Install GitHub Copilot CLI
+        run: |
+          if command -v copilot > /dev/null 2>&1; then
+            echo "✅ GitHub Copilot CLI is already installed"
+            copilot --version || true
+          else
+            echo "Installing GitHub Copilot CLI via npm..."
+            # Install via npm (recommended method)
+            # Package name: @github/copilot (requires Node.js v22+)
+            npm install -g @github/copilot || {
+              echo "❌ Failed to install Copilot CLI via npm"
+              echo "   Attempting alternative installation method..."
+              # Alternative: try installing via GitHub CLI extension
+              if command -v gh > /dev/null 2>&1; then
+                echo "   GitHub CLI is available, but Copilot CLI must be installed separately"
+                echo "   Please install Copilot CLI manually or ensure it's available in PATH"
+                exit 1
+              else
+                echo "   Neither npm nor gh are available"
+                exit 1
+              fi
+            }
+            echo "✅ Copilot CLI installed successfully"
+          fi
+
       - name: Verify GitHub Copilot CLI
         run: |
           if command -v copilot > /dev/null 2>&1; then
@@ -66,6 +93,11 @@ jobs:
             echo "   Please ensure GitHub Copilot is enabled and the CLI is installed"
             exit 1
           fi
+
+      - name: Setup Node.js (for Copilot CLI)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
 
       - name: Setup Python
         uses: actions/setup-python@v5
