@@ -94,6 +94,42 @@ jobs:
             exit 1
           fi
 
+      - name: Verify Copilot CLI Authentication
+        run: |
+          # Check if required authentication token is configured
+          # Note: We check if secrets exist (they'll be empty strings if not set)
+          COPILOT_TOKEN="${{ secrets.copilot_token }}"
+          GITHUB_TOKEN_AVAILABLE="${{ secrets.GITHUB_TOKEN != '' }}"
+          
+          if [ -z "$COPILOT_TOKEN" ] && [ "$GITHUB_TOKEN_AVAILABLE" != "true" ]; then
+            echo "❌ Copilot CLI authentication token is not configured"
+            echo ""
+            echo "The Copilot CLI requires authentication. Please configure one of the following:"
+            echo ""
+            echo "Option 1: Set 'copilot_token' secret (Recommended)"
+            echo "  • Go to repository Settings > Secrets and variables > Actions"
+            echo "  • Add a new secret named 'copilot_token'"
+            echo "  • Value: A Fine-Grained Personal Access Token with Copilot permissions"
+            echo ""
+            echo "Option 2: Ensure GITHUB_TOKEN has Copilot permissions"
+            echo "  • GITHUB_TOKEN is automatically available but may need Copilot scope"
+            echo "  • Check workflow permissions in repository settings"
+            echo ""
+            echo "To create a Fine-Grained Personal Access Token:"
+            echo "  1. Go to GitHub Settings > Developer settings > Personal access tokens > Fine-grained tokens"
+            echo "  2. Generate a new token with 'copilot' scope/permissions"
+            echo "  3. Add it as a repository secret named 'copilot_token'"
+            echo ""
+            exit 1
+          else
+            echo "✅ Authentication token is configured"
+            if [ -n "$COPILOT_TOKEN" ]; then
+              echo "   Using copilot_token secret"
+            else
+              echo "   Using GITHUB_TOKEN (automatically available)"
+            fi
+          fi
+
       - name: Setup Node.js (for Copilot CLI)
         uses: actions/setup-node@v4
         with:
@@ -158,7 +194,11 @@ jobs:
       - name: Generate markdown links
         working-directory: ./website
         env:
-          GITHUB_TOKEN: ${{ secrets.copilot_token }}
+          # Copilot CLI uses GITHUB_TOKEN, GH_TOKEN, or COPILOT_GITHUB_TOKEN
+          # Prefer copilot_token if set, otherwise use GITHUB_TOKEN
+          GITHUB_TOKEN: ${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}
           CONTENT_FOLDER: ${{ inputs.content_folder }}
           CUSTOM_PROMPT: ${{ inputs.custom_prompt }}
           DEFAULT_PROMPT: ${{ steps.read-prompt.outputs.prompt }}
