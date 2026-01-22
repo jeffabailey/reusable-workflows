@@ -55,18 +55,16 @@ jobs:
       - name: Set Default Git Branch
         run: git config --global init.defaultBranch master
 
-      - name: Authenticate GitHub CLI
+      - name: Verify GitHub Copilot CLI
         run: |
-          echo "${{ secrets.copilot_token }}" | gh auth login --with-token
-      
-      - name: Verify GitHub CLI Copilot Chat
-        run: |
-          if gh copilot chat --help > /dev/null 2>&1; then
-            echo "✅ GitHub CLI Copilot Chat is available"
+          if command -v copilot > /dev/null 2>&1; then
+            echo "✅ GitHub Copilot CLI is available"
+            copilot --version || true
           else
-            echo "⚠️  GitHub CLI Copilot Chat may not be available"
-            echo "   This workflow requires GitHub Copilot subscription and gh CLI v2.40.0+"
-            echo "   The workflow will attempt to proceed but may fail if Copilot Chat is unavailable"
+            echo "❌ GitHub Copilot CLI is not available"
+            echo "   This workflow requires GitHub Copilot subscription and the Copilot CLI"
+            echo "   Please ensure GitHub Copilot is enabled and the CLI is installed"
+            exit 1
           fi
 
       - name: Setup Python
@@ -102,23 +100,23 @@ jobs:
       - name: Copy script to website repository
         run: |
           # Verify source directory exists
-          if [ ! -d "reusable-workflows/.github/scripts/generate-links" ]; then
-            echo "Error: Script directory not found at reusable-workflows/.github/scripts/generate-links"
+          if [ ! -d "reusable-workflows/.github/workflows/generate-links" ]; then
+            echo "Error: Script directory not found at reusable-workflows/.github/workflows/generate-links"
             echo "Listing reusable-workflows directory:"
             ls -la reusable-workflows/ || true
             echo "Listing reusable-workflows/.github directory:"
             ls -la reusable-workflows/.github/ || true
-            echo "Listing reusable-workflows/.github/scripts directory:"
-            ls -la reusable-workflows/.github/scripts/ || true
+            echo "Listing reusable-workflows/.github/workflows directory:"
+            ls -la reusable-workflows/.github/workflows/ || true
             exit 1
           fi
           # Create destination directory
-          mkdir -p website/.github/scripts/generate-links
+          mkdir -p website/.github/workflows/generate-links
           # Copy all files from source to destination
-          cp -r reusable-workflows/.github/scripts/generate-links/. website/.github/scripts/generate-links/
+          cp -r reusable-workflows/.github/workflows/generate-links/. website/.github/workflows/generate-links/
           # Make script executable
-          if [ -f "website/.github/scripts/generate-links/generate_links.py" ]; then
-            chmod +x website/.github/scripts/generate-links/generate_links.py
+          if [ -f "website/.github/workflows/generate-links/generate_links.py" ]; then
+            chmod +x website/.github/workflows/generate-links/generate_links.py
           else
             echo "Error: generate_links.py not found after copy"
             exit 1
@@ -134,7 +132,7 @@ jobs:
           DEFAULT_PROMPT: ${{ steps.read-prompt.outputs.prompt }}
           DEBUG: ${{ inputs.debug }}
         run: |
-          python3 .github/scripts/generate-links/generate_links.py
+          python3 .github/workflows/generate-links/generate_links.py
 
       - name: Configure Git
         working-directory: ./website

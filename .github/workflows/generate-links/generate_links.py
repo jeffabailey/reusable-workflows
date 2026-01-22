@@ -6,14 +6,14 @@ This script processes markdown files in a specified directory and uses
 GitHub Copilot to add internal links based on the provided prompt.
 
 Requirements:
-- GitHub CLI (gh) with Copilot Chat feature enabled
+- GitHub Copilot CLI installed and authenticated
 - GitHub token with appropriate permissions
 - Python 3.11+
 
-Note: GitHub Copilot Chat API access may require:
+Note: GitHub Copilot CLI access requires:
 - GitHub Copilot subscription
+- Copilot CLI installed (separate from GitHub CLI)
 - Appropriate API permissions
-- GitHub CLI v2.40.0+ with Copilot Chat feature
 """
 
 import os
@@ -26,9 +26,9 @@ from typing import List, Optional
 
 def get_github_copilot_response(prompt: str, content: str, github_token: str) -> Optional[str]:
     """
-    Get response from GitHub Copilot Chat API.
+    Get response from GitHub Copilot CLI.
     
-    This function attempts to use GitHub CLI with Copilot Chat,
+    This function uses the dedicated Copilot CLI in non-interactive mode,
     or falls back to GitHub API if available.
     """
     import requests
@@ -44,28 +44,30 @@ Content:
 
 Please provide the updated markdown with internal links added. Return only the updated markdown content."""
     
-    # Try using GitHub CLI with Copilot Chat first
+    # Try using GitHub Copilot CLI
     try:
-        # Use gh copilot chat if available
-        # Note: This requires GitHub CLI v2.40.0+ with Copilot Chat feature
+        # Use copilot CLI in non-interactive mode with prompt
+        # Note: This requires GitHub Copilot subscription and the Copilot CLI
+        # --allow-all-tools is required for non-interactive mode
+        # --silent outputs only the agent response (useful for scripting)
         result = subprocess.run(
-            ['gh', 'copilot', 'chat', full_prompt],
+            ['copilot', '-p', full_prompt, '--allow-all-tools', '--silent'],
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,  # Increased timeout for Copilot CLI
             env={**os.environ, 'GITHUB_TOKEN': github_token}
         )
         
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
         elif result.stderr:
-            print(f"gh copilot chat error: {result.stderr}", file=sys.stderr)
+            print(f"copilot CLI error: {result.stderr}", file=sys.stderr)
     except FileNotFoundError:
-        print("Warning: GitHub CLI (gh) not found. Trying GitHub API...", file=sys.stderr)
+        print("Warning: GitHub Copilot CLI not found. Trying GitHub API...", file=sys.stderr)
     except subprocess.TimeoutExpired:
-        print("Warning: GitHub Copilot Chat request timed out", file=sys.stderr)
+        print("Warning: GitHub Copilot CLI request timed out", file=sys.stderr)
     except subprocess.SubprocessError as e:
-        print(f"Warning: Could not use gh copilot chat: {e}", file=sys.stderr)
+        print(f"Warning: Could not use copilot CLI: {e}", file=sys.stderr)
     
     # Fallback: Try GitHub Copilot Chat API directly
     # Note: This endpoint may require special permissions
