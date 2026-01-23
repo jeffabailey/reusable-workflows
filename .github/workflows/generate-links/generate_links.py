@@ -2,7 +2,7 @@
 """
 Generate markdown links using GitHub Copilot Chat API.
 
-This script processes markdown files in a specified directory and uses
+This script processes markdown files from the Hugo published posts list and uses
 GitHub Copilot to add internal links based on the provided prompt.
 
 Requirements:
@@ -19,67 +19,239 @@ Note: GitHub Copilot CLI access requires:
 import os
 import sys
 import subprocess
-import json
-import shlex
-import tempfile
+import csv
+import io
+import re
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Dict, Optional, Tuple
+from difflib import unified_diff
 
 
-def get_github_copilot_response(prompt: str, content: str, github_token: str) -> Optional[str]:
+def parse_hugo_csv(hugo_list_csv: str) -> Dict[str, Dict]:
     """
-    Get response from GitHub Copilot CLI.
+    Parse Hugo list CSV to extract published posts.
     
-    This function uses the dedicated Copilot CLI in non-interactive mode,
-    or falls back to GitHub API if available.
+    Returns a dictionary mapping file paths to post metadata.
     """
-    import requests
+    published_posts = {}
+    
+    if not hugo_list_csv or not hugo_list_csv.strip():
+        return published_posts
+    
+    try:
+        # Parse CSV
+        reader = csv.DictReader(io.StringIO(hugo_list_csv))
+        for row in reader:
+            # Only include published posts (draft=false)
+            if row.get('draft', '').lower() == 'false':
+                path = row.get('path', '')
+                if path:
+                    published_posts[path] = {
+                        'path': path,
+                        'permalink': row.get('permalink', ''),
+                        'title': row.get('title', ''),
+                        'draft': row.get('draft', 'false')
+                    }
+    except Exception as e:
+        print(f"⚠️  Warning: Could not parse Hugo CSV: {e}", file=sys.stderr)
+        print("   Continuing without published posts list...", file=sys.stderr)
+    
+    return published_posts
+
+
+def find_published_files(content_folder: str, published_posts: Dict[str, Dict]) -> List[Path]:
+    """
+    Find markdown files that match published posts from Hugo list.
+    
+    Returns a list of Path objects for published post files.
+    """
+    content_path = Path(content_folder)
+    if not content_path.exists():
+        print(f"Error: Content folder {content_folder} does not exist", file=sys.stderr)
+        sys.exit(1)
+    
+    # Find all markdown files
+    all_md_files = list(content_path.rglob('*.md'))
+    
+    # If no published posts list, return all non-excluded files
+    if not published_posts:
+        published_files = [
+            f for f in all_md_files
+            if 'node_modules' not in str(f) 
+            and '.git' not in str(f)
+            and f.name != 'notes.md'
+            and f.name != 'links.md'
+            and f.name != '_index.md'
+        ]
+        return published_files
+    
+    # Build a set of normalized published post paths for quick lookup
+    published_paths = set()
+    for post_path, post_data in published_posts.items():
+        # Normalize path
+        norm_path = post_path.replace('\\', '/')
+        published_paths.add(norm_path)
+        # Also add without .md extension if present
+        if norm_path.endswith('.md'):
+            published_paths.add(norm_path[:-3])
+        # Add directory path if it's an index.md
+        if norm_path.endswith('/index.md'):
+            published_paths.add(norm_path[:-9])  # Remove '/index.md'
+    
+    # Filter to only published posts
+    published_files = []
+    for md_file in all_md_files:
+        # Skip excluded files
+        if 'node_modules' in str(md_file) or '.git' in str(md_file):
+            continue
+        if md_file.name == 'notes.md' or md_file.name == 'links.md':
+            continue
+        
+        # Check if this file matches a published post
+        try:
+            rel_path = md_file.relative_to(content_path)
+            path_str = str(rel_path).replace('\\', '/')
+            
+            # Check various path formats
+            matched = False
+            
+            # Direct match
+            if path_str in published_paths:
+                matched = True
+            # Match without extension
+            elif path_str.replace('.md', '') in published_paths:
+                matched = True
+            # Match directory to index.md
+            elif md_file.name == 'index.md':
+                parent_dir = str(rel_path.parent).replace('\\', '/')
+                if parent_dir in published_paths or f"{parent_dir}/index.md" in published_paths:
+                    matched = True
+                # Also check if the post path ends with this directory
+                for post_path in published_paths:
+                    if post_path.endswith(parent_dir) or post_path.endswith(f"{parent_dir}/index.md"):
+                        matched = True
+                        break
+            
+            if matched:
+                published_files.append(md_file)
+        except Exception as e:
+            # Skip files that can't be processed
+            continue
+    
+    return published_files
+
+
+def extract_links_from_diff(original: str, updated: str) -> List[str]:
+    """
+    Extract links that were added by comparing original and updated content.
+    
+    Returns a list of link descriptions.
+    """
+    links_added = []
+    
+    # Find markdown links: [text](url)
+    markdown_link_pattern = r'\[([^\]]+)\]\(([^\)]+)\)'
+    
+    # Find Hugo shortcode links: {{< relref "path" >}} or [text]({{< relref "path" >}})
+    hugo_shortcode_pattern = r'\[([^\]]+)\]\(\{\{<\s*relref\s+["\']([^"\']+)["\']\s*>\}\}\)'
+    
+    # Extract all links from both formats
+    original_md_links = set(re.findall(markdown_link_pattern, original))
+    updated_md_links = set(re.findall(markdown_link_pattern, updated))
+    
+    original_hugo_links = set(re.findall(hugo_shortcode_pattern, original))
+    updated_hugo_links = set(re.findall(hugo_shortcode_pattern, updated))
+    
+    # Find new markdown links
+    new_md_links = updated_md_links - original_md_links
+    for text, url in new_md_links:
+        links_added.append(f"  - [{text}]({url})")
+    
+    # Find new Hugo shortcode links
+    new_hugo_links = updated_hugo_links - original_hugo_links
+    for text, path in new_hugo_links:
+        links_added.append(f"  - [{text}]({{{{< relref \"{path}\" >}}}})")
+    
+    # Also check for standalone relref shortcodes that might have been added
+    standalone_relref_pattern = r'\{\{<\s*relref\s+["\']([^"\']+)["\']\s*>\}\}'
+    original_standalone = set(re.findall(standalone_relref_pattern, original))
+    updated_standalone = set(re.findall(standalone_relref_pattern, updated))
+    new_standalone = updated_standalone - original_standalone
+    for path in new_standalone:
+        links_added.append(f"  - {{{{< relref \"{path}\" >}}}}")
+    
+    return links_added
+
+
+def get_github_copilot_response_batch(
+    prompt: str,
+    files_content: Dict[Path, str],
+    github_token: str
+) -> Optional[Dict[Path, str]]:
+    """
+    Get response from GitHub Copilot CLI for multiple files in a single call.
+    
+    Returns a dictionary mapping file paths to updated content.
+    """
+    # Build content section with all files
+    files_section = "\n\n## Files to Process\n\n"
+    file_list = []
+    for file_path, content in files_content.items():
+        file_list.append(str(file_path))
+        # Limit content size to avoid token limits
+        content_preview = content[:4000] if len(content) > 4000 else content
+        files_section += f"### File: {file_path}\n\n```markdown\n{content_preview}\n```\n\n"
+    
+    file_list_str = "\n".join([f"- {fp}" for fp in file_list])
     
     # Construct the full prompt
     full_prompt = f"""{prompt}
 
-Please analyze the following markdown content and add appropriate internal links to related content. 
-Only add links that are relevant and improve the content. Maintain the existing structure and style.
+## Files to Process
 
-Content:
-{content[:8000]}
+I need you to process {len(files_content)} markdown files and add internal links to each one. The files are:
 
-Please provide the updated markdown with internal links added. Return only the updated markdown content."""
+{file_list_str}
+
+{files_section}
+
+## Instructions
+
+1. Process ALL {len(files_content)} files listed above
+2. For each file, add appropriate internal links to related published content
+3. ONLY link to posts that are in the published posts list provided earlier (draft=false)
+4. Return the updated content for EACH file using this exact format:
+
+===FILE_START:{{file_path}}===
+[updated markdown content for this file]
+===FILE_END:{{file_path}}===
+
+For example, if processing file "blog/post/index.md", return:
+
+===FILE_START:blog/post/index.md===
+[updated content here]
+===FILE_END:blog/post/index.md===
+
+**IMPORTANT**: 
+- Process ALL files, not just one
+- Use the exact file paths shown in the file list above
+- Include the ===FILE_START: and ===FILE_END: markers for each file
+- Only add links to published posts (draft=false from the Hugo list)
+
+Please process all {len(files_content)} files and return the updated content with internal links added."""
     
     # Try using GitHub Copilot CLI
     try:
-        # Use copilot CLI in non-interactive mode with prompt
-        # Note: This requires GitHub Copilot subscription and the Copilot CLI
-        # --allow-all-tools is required for non-interactive mode
-        # --silent outputs only the agent response (useful for scripting)
-        # Only use COPILOT_GITHUB_TOKEN - no GITHUB_TOKEN or GH_TOKEN
-        # Clean the token (remove any whitespace/newlines)
         clean_token = github_token.strip()
         subprocess_env = {**os.environ}
-        # Only set COPILOT_GITHUB_TOKEN - copilot CLI checks this first
         subprocess_env['COPILOT_GITHUB_TOKEN'] = clean_token
         
-        # Verify token is not empty
         if not clean_token:
             print("Error: GitHub token is empty or invalid", file=sys.stderr)
             sys.exit(1)
         
-        # Debug: Verify COPILOT_GITHUB_TOKEN is set (masked)
-        if os.environ.get('DEBUG', 'false').lower() == 'true':
-            print(f"Setting COPILOT_GITHUB_TOKEN for copilot CLI:")
-            print(f"  COPILOT_GITHUB_TOKEN: {'*' * min(len(clean_token), 20)}...")
-            print(f"  Token length: {len(clean_token)} characters")
-            # Verify COPILOT_GITHUB_TOKEN is in the subprocess env
-            print(f"  Verifying subprocess_env has COPILOT_GITHUB_TOKEN:")
-            print(f"    COPILOT_GITHUB_TOKEN in env: {'COPILOT_GITHUB_TOKEN' in subprocess_env}")
-            if 'COPILOT_GITHUB_TOKEN' in subprocess_env:
-                print(f"    COPILOT_GITHUB_TOKEN length in env: {len(subprocess_env['COPILOT_GITHUB_TOKEN'])}")
+        debug_flag = os.environ.get('DEBUG', 'false').lower() == 'true'
         
-        # Use env command to explicitly set COPILOT_GITHUB_TOKEN when calling copilot
-        # Only use COPILOT_GITHUB_TOKEN - no GITHUB_TOKEN or GH_TOKEN
-        debug_flag = 'true' if os.environ.get('DEBUG', 'false').lower() == 'true' else 'false'
-        
-        # Build the command with env to explicitly set COPILOT_GITHUB_TOKEN
         copilot_cmd = [
             'env',
             f'COPILOT_GITHUB_TOKEN={clean_token}',
@@ -89,163 +261,128 @@ Please provide the updated markdown with internal links added. Return only the u
             '--silent'
         ]
         
-        if debug_flag == 'true':
+        if debug_flag:
             print(f"Running copilot with COPILOT_GITHUB_TOKEN:")
-            print(f"  COPILOT_GITHUB_TOKEN length: {len(clean_token)}")
+            print(f"  Processing {len(files_content)} files in a single call")
             print(f"  Prompt length: {len(full_prompt)} characters")
-            print(f"  Command: {' '.join(copilot_cmd[:3])} ... [prompt] --allow-all-tools --silent")
         
-        print("Calling copilot CLI (this may take a moment)...", flush=True)
+        print(f"Calling copilot CLI to process {len(files_content)} files (this may take a moment)...", flush=True)
+        
         try:
             result = subprocess.run(
                 copilot_cmd,
                 capture_output=True,
                 text=True,
-                timeout=300,  # 5 minute timeout
+                timeout=600,  # 10 minute timeout for batch processing
                 env=subprocess_env
             )
-            if debug_flag == 'true':
+            
+            if debug_flag:
                 print(f"Copilot CLI completed with return code: {result.returncode}")
                 if result.stdout:
                     print(f"  stdout length: {len(result.stdout)} characters")
                 if result.stderr:
                     print(f"  stderr length: {len(result.stderr)} characters")
         except subprocess.TimeoutExpired:
-            print("❌ Copilot CLI timed out after 5 minutes", file=sys.stderr)
-            print("   This may indicate the prompt is too long or copilot CLI is unresponsive", file=sys.stderr)
+            print("❌ Copilot CLI timed out after 10 minutes", file=sys.stderr)
+            print("   This may indicate too many files or the prompt is too long", file=sys.stderr)
             sys.exit(1)
         
-        # Check for errors first - fail immediately if any error is detected
+        # Check for errors
         if result.stderr:
             error_msg = result.stderr.lower()
-            # Check for authentication errors specifically
             if any(keyword in error_msg for keyword in ['no authentication', 'authentication information', 'not authenticated', 'login']):
                 print(f"copilot CLI error: {result.stderr}", file=sys.stderr)
                 print("❌ Copilot CLI authentication failed. Exiting immediately.", file=sys.stderr)
                 sys.exit(1)
-            # Check for any other errors in stderr
             if 'error:' in error_msg:
                 print(f"copilot CLI error: {result.stderr}", file=sys.stderr)
                 print(f"❌ Copilot CLI failed. Exiting immediately.", file=sys.stderr)
                 sys.exit(1)
         
-        # Fail immediately for any non-zero return code
         if result.returncode != 0:
             if result.stderr:
                 print(f"copilot CLI error: {result.stderr}", file=sys.stderr)
             print(f"❌ Copilot CLI failed with return code {result.returncode}. Exiting immediately.", file=sys.stderr)
             sys.exit(1)
         
-        # Only return if we have valid output
         if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
+            # Parse the response to extract updates for each file
+            return parse_copilot_response(result.stdout.strip(), files_content.keys())
         
-        # If we get here, something unexpected happened
         print("❌ Copilot CLI returned unexpected result. Exiting immediately.", file=sys.stderr)
         sys.exit(1)
     except FileNotFoundError:
-        print("Warning: GitHub Copilot CLI not found. Trying GitHub API...", file=sys.stderr)
-    except subprocess.TimeoutExpired:
-        print("Warning: GitHub Copilot CLI request timed out", file=sys.stderr)
-    except subprocess.SubprocessError as e:
-        print(f"Warning: Could not use copilot CLI: {e}", file=sys.stderr)
-    
-    # Fallback: Try GitHub Copilot Chat API directly
-    # Note: This endpoint may require special permissions
-    try:
-        headers = {
-            'Authorization': f'token {github_token}',
-            'Accept': 'application/vnd.github+json',
-            'X-GitHub-Api-Version': '2022-11-28'
-        }
-        
-        # GitHub Copilot Chat API endpoint (if available)
-        # This is a placeholder - the actual endpoint may differ
-        # You may need to use GitHub's Copilot Chat API when it becomes available
-        # For now, we'll return None to indicate we need a different approach
-        
-        # Alternative: Use GitHub's API to create a completion request
-        # This would require the Copilot Chat API which may not be publicly available yet
-        
+        print("Warning: GitHub Copilot CLI not found", file=sys.stderr)
     except Exception as e:
-        print(f"Warning: Could not use GitHub API: {e}", file=sys.stderr)
+        print(f"Warning: Could not use copilot CLI: {e}", file=sys.stderr)
     
     return None
 
 
-def process_markdown_file(
-    file_path: Path,
-    prompt: str,
-    github_token: str,
-    dry_run: bool = False,
-    hugo_list_csv: str = ''
-) -> bool:
+def parse_copilot_response(response: str, file_paths: List[Path]) -> Dict[Path, str]:
     """
-    Process a single markdown file to add internal links.
+    Parse Copilot response to extract updated content for each file.
     
-    Returns True if changes were made, False otherwise.
+    Returns a dictionary mapping file paths to updated content.
     """
-    try:
-        # Read the file
-        with open(file_path, 'r', encoding='utf-8') as f:
-            original_content = f.read()
+    updates = {}
+    
+    # Try multiple parsing strategies
+    
+    # Strategy 1: Structured format with FILE_START/FILE_END markers
+    pattern1 = r'===FILE_START:(.+?)===\s*(.*?)\s*===FILE_END:\1==='
+    matches1 = re.findall(pattern1, response, re.DOTALL)
+    
+    if matches1:
+        for file_path_str, content in matches1:
+            # Find matching file path
+            for file_path in file_paths:
+                file_path_normalized = str(file_path).replace('\\', '/')
+                if (file_path_normalized == file_path_str or 
+                    file_path.name in file_path_str or
+                    str(file_path) in file_path_str):
+                    updates[file_path] = content.strip()
+                    break
+    
+    # Strategy 2: Look for file headers like "## File: path/to/file.md"
+    if not updates:
+        pattern2 = r'##\s*File:\s*(.+?)\n\n(.*?)(?=##\s*File:|$)'
+        matches2 = re.findall(pattern2, response, re.DOTALL)
         
-        # Enhance prompt with Hugo list data if available
-        enhanced_prompt = prompt
-        if hugo_list_csv and hugo_list_csv.strip():
-            enhanced_prompt = f"""{prompt}
-
-## Published Blog Posts Data
-
-The following CSV data contains all published blog posts from `hugo list all`:
-
-```
-{hugo_list_csv}
-```
-
-Use this data to identify which posts are published and available for internal linking. Filter by:
-- `draft=false` (only published posts)
-- Posts in the `content/blog` directory
-- Exclude `_index.md` files
-
-When adding internal links, reference posts from this list using their `path` or `permalink` values.
-"""
-        
-        # Get updated content from GitHub Copilot
-        updated_content = get_github_copilot_response(
-            enhanced_prompt,
-            original_content,
-            github_token
-        )
-        
-        if updated_content is None:
-            print(f"⚠️  Could not process {file_path} - Copilot API unavailable")
-            print(f"   This may require GitHub Copilot subscription and proper API access")
-            return False
-        
-        # Check if content changed
-        if updated_content != original_content:
-            if not dry_run:
-                # Write the updated content
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(updated_content)
-                print(f"✅ Updated {file_path}")
-            else:
-                print(f"🔍 Would update {file_path} (dry run)")
-            return True
-        else:
-            print(f"ℹ️  No changes needed for {file_path}")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Error processing {file_path}: {e}", file=sys.stderr)
-        return False
+        if matches2:
+            for file_path_str, content in matches2:
+                for file_path in file_paths:
+                    if file_path.name in file_path_str or str(file_path) in file_path_str:
+                        updates[file_path] = content.strip()
+                        break
+    
+    # Strategy 3: If only one file, assume entire response is for that file
+    if not updates and len(file_paths) == 1:
+        updates[file_paths[0]] = response.strip()
+    
+    # Strategy 4: If multiple files but no structure, try to split by common delimiters
+    if not updates and len(file_paths) > 1:
+        # Try splitting by triple backticks or horizontal rules
+        sections = re.split(r'```|---|\*\*\*', response)
+        if len(sections) >= len(file_paths):
+            for i, file_path in enumerate(file_paths):
+                if i < len(sections):
+                    updates[file_path] = sections[i].strip()
+    
+    if not updates:
+        print("⚠️  Warning: Could not parse structured response from Copilot", file=sys.stderr)
+        print("   Response may not contain file markers. Attempting to use entire response...", file=sys.stderr)
+        # Last resort: assign entire response to first file (not ideal but better than failing)
+        if file_paths:
+            updates[file_paths[0]] = response.strip()
+    
+    return updates
 
 
 def main():
     """Main entry point for the script."""
     # Get environment variables
-    # Only use COPILOT_GITHUB_TOKEN - no GITHUB_TOKEN or GH_TOKEN fallback
     github_token = os.environ.get('COPILOT_GITHUB_TOKEN')
     content_folder = os.environ.get('CONTENT_FOLDER', 'content/blog')
     custom_prompt = os.environ.get('CUSTOM_PROMPT', '')
@@ -260,12 +397,8 @@ def main():
         sys.exit(1)
     
     if debug:
-        # Show which token source was used (masked for security)
-        token_source = 'COPILOT_GITHUB_TOKEN' if os.environ.get('COPILOT_GITHUB_TOKEN') else \
-                      'GH_TOKEN' if os.environ.get('GH_TOKEN') else \
-                      'GITHUB_TOKEN'
         token_preview = f"{github_token[:8]}...{github_token[-4:]}" if len(github_token) > 12 else "***"
-        print(f"Using token from {token_source}: {token_preview}")
+        print(f"Using token from COPILOT_GITHUB_TOKEN: {token_preview}")
         print(f"Token length: {len(github_token)} characters")
     
     # Use custom prompt if provided, otherwise use default
@@ -277,78 +410,142 @@ def main():
         print(f"  DEFAULT_PROMPT length: {len(default_prompt)}", file=sys.stderr)
         sys.exit(1)
     
+    # Parse Hugo CSV to get published posts
+    published_posts = parse_hugo_csv(hugo_list_csv)
+    
     if debug:
         print(f"Content folder: {content_folder}")
         print(f"Prompt length: {len(prompt)} characters")
         print(f"Using custom prompt: {bool(custom_prompt)}")
         print(f"Dry run: {dry_run}")
-        if hugo_list_csv:
-            print(f"Hugo list CSV provided: {len(hugo_list_csv)} characters")
-        else:
-            print("No Hugo list CSV provided")
+        print(f"Found {len(published_posts)} published posts in Hugo list")
     
-    # Find all markdown files in the content folder
-    content_path = Path(content_folder)
-    if not content_path.exists():
-        print(f"Error: Content folder {content_folder} does not exist", file=sys.stderr)
-        sys.exit(1)
+    # Enhance prompt with Hugo list data
+    enhanced_prompt = prompt
+    if hugo_list_csv and hugo_list_csv.strip():
+        enhanced_prompt = f"""{prompt}
+
+## Published Blog Posts Data
+
+The following CSV data contains all published blog posts from `hugo list all`:
+
+```
+{hugo_list_csv}
+```
+
+**CRITICAL: ONLY link to posts from this list that have `draft=false`.**
+**CRITICAL: If a post is not in this list, DO NOT create a link to it.**
+
+Use this data to identify which posts are published and available for internal linking. Filter by:
+- `draft=false` (only published posts)
+- Posts in the `content/blog` directory
+- Exclude `_index.md` files
+
+When adding internal links, reference posts from this list using their `path` or `permalink` values.
+"""
     
-    # Find markdown files (excluding certain patterns)
-    # CRITICAL: Exclude notes.md files - these are draft/private notes, not published blog posts
-    all_md_files = list(content_path.rglob('*.md'))
-    notes_files = [f for f in all_md_files if f.name == 'notes.md']
-    md_files = [
-        f for f in all_md_files
-        if 'node_modules' not in str(f) 
-        and '.git' not in str(f)
-        and f.name != 'notes.md'  # Explicitly exclude notes.md files
-    ]
+    # Find published files
+    published_files = find_published_files(content_folder, published_posts)
     
     if debug:
-        print(f"Found {len(all_md_files)} total markdown files")
-        if notes_files:
-            print(f"Excluding {len(notes_files)} notes.md files (draft/private notes, not published posts)")
-        print(f"Processing {len(md_files)} markdown files")
+        print(f"Found {len(published_files)} published markdown files to process")
     
-    if not md_files:
-        print("No markdown files found to process")
+    if not published_files:
+        print("No published markdown files found to process")
         sys.exit(0)
     
-    # Process each file
-    changes_made = 0
-    errors = 0
-    for md_file in md_files:
-        if debug:
-            print(f"\nProcessing: {md_file}")
-        
+    # Read all files
+    files_content = {}
+    for file_path in published_files:
         try:
-            if process_markdown_file(md_file, prompt, github_token, dry_run, hugo_list_csv):
-                changes_made += 1
+            with open(file_path, 'r', encoding='utf-8') as f:
+                files_content[file_path] = f.read()
         except Exception as e:
-            errors += 1
-            print(f"❌ Failed to process {md_file}: {e}", file=sys.stderr)
-            if not debug:
-                # In non-debug mode, continue processing other files
-                continue
-            else:
-                # In debug mode, show full traceback
-                import traceback
-                traceback.print_exc()
+            print(f"⚠️  Warning: Could not read {file_path}: {e}", file=sys.stderr)
+            continue
     
-    print(f"\n{'Would process' if dry_run else 'Processed'} {changes_made} file(s)")
-    if errors > 0:
-        print(f"⚠️  {errors} file(s) had errors during processing", file=sys.stderr)
-    
-    # Exit with error if there were processing errors
-    if errors > 0:
-        sys.exit(1)
-    elif changes_made > 0 and not dry_run:
+    if not files_content:
+        print("No files could be read for processing")
         sys.exit(0)
-    elif changes_made == 0:
+    
+    # Process all files in a single Copilot call
+    print(f"\n📝 Processing {len(files_content)} files in a single batch...")
+    updates = get_github_copilot_response_batch(enhanced_prompt, files_content, github_token)
+    
+    if updates is None:
+        print("❌ Could not process files - Copilot API unavailable", file=sys.stderr)
+        print("   This may require GitHub Copilot subscription and proper API access", file=sys.stderr)
+        sys.exit(1)
+    
+    # Check if we got updates for all files
+    files_with_updates = set(updates.keys())
+    files_expected = set(files_content.keys())
+    missing_files = files_expected - files_with_updates
+    
+    if missing_files:
+        print(f"⚠️  Warning: Copilot did not return updates for {len(missing_files)} file(s):", file=sys.stderr)
+        for missing_file in missing_files:
+            print(f"   - {missing_file}", file=sys.stderr)
+        print("   These files will be skipped.", file=sys.stderr)
+    
+    # Process updates and show what links were added
+    changes_summary = []
+    changes_made = 0
+    
+    print("\n" + "="*80)
+    print("SUMMARY OF CHANGES - Links Added to Files")
+    print("="*80 + "\n")
+    
+    for file_path in files_content.keys():
+        if file_path not in updates:
+            if debug:
+                print(f"⚠️  {file_path} - No update received from Copilot")
+            continue
+            
+        updated_content = updates[file_path]
+        original_content = files_content.get(file_path, '')
+        
+        if updated_content != original_content:
+            # Extract links that were added
+            links_added = extract_links_from_diff(original_content, updated_content)
+            
+            if links_added:
+                changes_made += 1
+                print(f"📄 {file_path}")
+                print(f"   Added {len(links_added)} link(s):")
+                for link in links_added:
+                    print(link)
+                print()
+                
+                changes_summary.append({
+                    'file': file_path,
+                    'links_count': len(links_added),
+                    'links': links_added
+                })
+                
+                # Write the updated content if not dry run
+                if not dry_run:
+                    try:
+                        with open(file_path, 'w', encoding='utf-8') as f:
+                            f.write(updated_content)
+                    except Exception as e:
+                        print(f"❌ Error writing {file_path}: {e}", file=sys.stderr)
+            else:
+                if debug:
+                    print(f"ℹ️  {file_path} - Content updated but no new links detected")
+        else:
+            if debug:
+                print(f"ℹ️  {file_path} - No changes needed")
+    
+    print("="*80)
+    print(f"\n{'Would update' if dry_run else 'Updated'} {changes_made} file(s) with new internal links")
+    
+    if changes_made == 0:
         print("No changes were made to any files")
         sys.exit(0)
-    else:
-        sys.exit(0)
+    
+    # Exit successfully
+    sys.exit(0)
 
 
 if __name__ == '__main__':
