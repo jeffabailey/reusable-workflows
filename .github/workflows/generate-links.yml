@@ -130,6 +130,39 @@ jobs:
             fi
           fi
 
+      - name: Test Copilot CLI Authentication
+        env:
+          GITHUB_TOKEN: ${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Testing Copilot CLI authentication..."
+          # Test with a simple prompt to verify authentication works
+          # Use env command to explicitly set the token
+          TEST_TOKEN="${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}"
+          if [ -z "$TEST_TOKEN" ]; then
+            echo "❌ No token available for testing"
+            exit 1
+          fi
+          
+          # Test copilot CLI with a minimal prompt
+          # This will fail immediately if authentication doesn't work
+          if env GITHUB_TOKEN="$TEST_TOKEN" GH_TOKEN="$TEST_TOKEN" COPILOT_GITHUB_TOKEN="$TEST_TOKEN" \
+             copilot -p "test" --allow-all-tools --silent > /dev/null 2>&1; then
+            echo "✅ Copilot CLI authentication test passed"
+          else
+            echo "❌ Copilot CLI authentication test failed"
+            echo ""
+            echo "The token is configured but copilot CLI cannot authenticate with it."
+            echo "This may indicate:"
+            echo "  • The token has expired"
+            echo "  • The token doesn't have Copilot permissions"
+            echo "  • The token is invalid or incorrect"
+            echo ""
+            echo "Please verify your token has Copilot permissions and is valid."
+            exit 1
+          fi
+
       - name: Setup Node.js (for Copilot CLI)
         uses: actions/setup-node@v4
         with:
