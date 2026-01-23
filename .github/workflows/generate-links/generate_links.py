@@ -52,13 +52,11 @@ Please provide the updated markdown with internal links added. Return only the u
         # Note: This requires GitHub Copilot subscription and the Copilot CLI
         # --allow-all-tools is required for non-interactive mode
         # --silent outputs only the agent response (useful for scripting)
-        # Copilot CLI checks for tokens in this order: COPILOT_GITHUB_TOKEN, GH_TOKEN, GITHUB_TOKEN
-        # Set all three to ensure authentication works
+        # Only use COPILOT_GITHUB_TOKEN - no GITHUB_TOKEN or GH_TOKEN
         # Clean the token (remove any whitespace/newlines)
         clean_token = github_token.strip()
         subprocess_env = {**os.environ}
-        subprocess_env['GITHUB_TOKEN'] = clean_token
-        subprocess_env['GH_TOKEN'] = clean_token
+        # Only set COPILOT_GITHUB_TOKEN - copilot CLI checks this first
         subprocess_env['COPILOT_GITHUB_TOKEN'] = clean_token
         
         # Verify token is not empty
@@ -66,30 +64,24 @@ Please provide the updated markdown with internal links added. Return only the u
             print("Error: GitHub token is empty or invalid", file=sys.stderr)
             sys.exit(1)
         
-        # Debug: Verify environment variables are set (masked)
+        # Debug: Verify COPILOT_GITHUB_TOKEN is set (masked)
         if os.environ.get('DEBUG', 'false').lower() == 'true':
-            print(f"Setting environment variables for copilot CLI:")
-            print(f"  GITHUB_TOKEN: {'*' * min(len(clean_token), 20)}...")
-            print(f"  GH_TOKEN: {'*' * min(len(clean_token), 20)}...")
+            print(f"Setting COPILOT_GITHUB_TOKEN for copilot CLI:")
             print(f"  COPILOT_GITHUB_TOKEN: {'*' * min(len(clean_token), 20)}...")
             print(f"  Token length: {len(clean_token)} characters")
-            # Verify the environment variables are actually in the subprocess env
-            print(f"  Verifying subprocess_env has tokens:")
-            print(f"    GITHUB_TOKEN in env: {'GITHUB_TOKEN' in subprocess_env}")
-            print(f"    GH_TOKEN in env: {'GH_TOKEN' in subprocess_env}")
+            # Verify COPILOT_GITHUB_TOKEN is in the subprocess env
+            print(f"  Verifying subprocess_env has COPILOT_GITHUB_TOKEN:")
             print(f"    COPILOT_GITHUB_TOKEN in env: {'COPILOT_GITHUB_TOKEN' in subprocess_env}")
-            if 'GITHUB_TOKEN' in subprocess_env:
-                print(f"    GITHUB_TOKEN length in env: {len(subprocess_env['GITHUB_TOKEN'])}")
+            if 'COPILOT_GITHUB_TOKEN' in subprocess_env:
+                print(f"    COPILOT_GITHUB_TOKEN length in env: {len(subprocess_env['COPILOT_GITHUB_TOKEN'])}")
         
-        # Use env command to explicitly set environment variables when calling copilot
-        # This ensures the variables are available to copilot CLI
+        # Use env command to explicitly set COPILOT_GITHUB_TOKEN when calling copilot
+        # Only use COPILOT_GITHUB_TOKEN - no GITHUB_TOKEN or GH_TOKEN
         debug_flag = 'true' if os.environ.get('DEBUG', 'false').lower() == 'true' else 'false'
         
-        # Build the command with env to explicitly set all three token variables
+        # Build the command with env to explicitly set COPILOT_GITHUB_TOKEN
         copilot_cmd = [
             'env',
-            f'GITHUB_TOKEN={clean_token}',
-            f'GH_TOKEN={clean_token}',
             f'COPILOT_GITHUB_TOKEN={clean_token}',
             'copilot',
             '-p', full_prompt,
@@ -98,9 +90,7 @@ Please provide the updated markdown with internal links added. Return only the u
         ]
         
         if debug_flag == 'true':
-            print(f"Running copilot with explicit env vars:")
-            print(f"  GITHUB_TOKEN length: {len(clean_token)}")
-            print(f"  GH_TOKEN length: {len(clean_token)}")
+            print(f"Running copilot with COPILOT_GITHUB_TOKEN:")
             print(f"  COPILOT_GITHUB_TOKEN length: {len(clean_token)}")
         
         result = subprocess.run(
@@ -219,12 +209,8 @@ def process_markdown_file(
 def main():
     """Main entry point for the script."""
     # Get environment variables
-    # Copilot CLI checks for tokens in this order: COPILOT_GITHUB_TOKEN, GH_TOKEN, GITHUB_TOKEN
-    github_token = (
-        os.environ.get('COPILOT_GITHUB_TOKEN') or
-        os.environ.get('GH_TOKEN') or
-        os.environ.get('GITHUB_TOKEN')
-    )
+    # Only use COPILOT_GITHUB_TOKEN - no GITHUB_TOKEN or GH_TOKEN fallback
+    github_token = os.environ.get('COPILOT_GITHUB_TOKEN')
     content_folder = os.environ.get('CONTENT_FOLDER', 'content/blog')
     custom_prompt = os.environ.get('CUSTOM_PROMPT', '')
     default_prompt = os.environ.get('DEFAULT_PROMPT', '')
@@ -232,10 +218,8 @@ def main():
     dry_run = os.environ.get('DRY_RUN', 'false').lower() == 'true'
     
     if not github_token:
-        print("Error: One of the following environment variables is required:", file=sys.stderr)
-        print("  - COPILOT_GITHUB_TOKEN", file=sys.stderr)
-        print("  - GH_TOKEN", file=sys.stderr)
-        print("  - GITHUB_TOKEN", file=sys.stderr)
+        print("Error: COPILOT_GITHUB_TOKEN environment variable is required", file=sys.stderr)
+        print("  Please set the COPILOT_GITHUB_TOKEN secret in the workflow", file=sys.stderr)
         sys.exit(1)
     
     if debug:

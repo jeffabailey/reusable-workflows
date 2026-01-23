@@ -26,9 +26,9 @@ on:
     secrets:
       access_token:
         required: true
-      copilot_token:
+      COPILOT_GITHUB_TOKEN:
         required: true
-        description: "GitHub token with Copilot API access"
+        description: "GitHub token with Copilot API access (must be named COPILOT_GITHUB_TOKEN)"
 
 jobs:
   generateLinks:
@@ -38,18 +38,11 @@ jobs:
     steps:
       - name: Display Token for Verification
         env:
-          GITHUB_TOKEN: ${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}
-          GH_TOKEN: ${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}
-          COPILOT_GITHUB_TOKEN: ${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
         run: |
-          # Determine which token source is being used
-          if [ -n "${{ secrets.copilot_token }}" ]; then
-            TOKEN_SOURCE="copilot_token secret"
-            TOKEN="${{ secrets.copilot_token }}"
-          else
-            TOKEN_SOURCE="GITHUB_TOKEN (automatically available)"
-            TOKEN="${{ secrets.GITHUB_TOKEN }}"
-          fi
+          # Only use COPILOT_GITHUB_TOKEN secret - no GITHUB_TOKEN fallback
+          TOKEN="${{ secrets.COPILOT_GITHUB_TOKEN }}"
+          TOKEN_SOURCE="COPILOT_GITHUB_TOKEN secret"
           
           echo "Token source: ${TOKEN_SOURCE}"
           if [ -n "$TOKEN" ]; then
@@ -64,7 +57,8 @@ jobs:
               echo "Token length: ${TOKEN_LEN} characters (too short to display safely)"
             fi
           else
-            echo "❌ No token available"
+            echo "❌ COPILOT_GITHUB_TOKEN secret is not configured"
+            echo "   Please set the 'COPILOT_GITHUB_TOKEN' secret in repository Settings > Secrets and variables > Actions"
             exit 1
           fi
 
@@ -128,43 +122,33 @@ jobs:
 
       - name: Verify Copilot CLI Authentication
         run: |
-          # Check if required authentication token is configured
-          # Note: We check if secrets exist (they'll be empty strings if not set)
-          COPILOT_TOKEN="${{ secrets.copilot_token }}"
-          GITHUB_TOKEN_AVAILABLE="${{ secrets.GITHUB_TOKEN != '' }}"
+          # Check if COPILOT_GITHUB_TOKEN secret is configured
+          # Only use COPILOT_GITHUB_TOKEN - no GITHUB_TOKEN fallback
+          COPILOT_TOKEN="${{ secrets.COPILOT_GITHUB_TOKEN }}"
           
-          if [ -z "$COPILOT_TOKEN" ] && [ "$GITHUB_TOKEN_AVAILABLE" != "true" ]; then
-            echo "❌ Copilot CLI authentication token is not configured"
+          if [ -z "$COPILOT_TOKEN" ]; then
+            echo "❌ COPILOT_GITHUB_TOKEN secret is not configured"
             echo ""
-            echo "The Copilot CLI requires authentication. Please configure one of the following:"
+            echo "The Copilot CLI requires the 'COPILOT_GITHUB_TOKEN' secret to be set."
             echo ""
-            echo "Option 1: Set 'copilot_token' secret (Recommended)"
-            echo "  • Go to repository Settings > Secrets and variables > Actions"
-            echo "  • Add a new secret named 'copilot_token'"
-            echo "  • Value: A Fine-Grained Personal Access Token with Copilot permissions"
+            echo "To configure:"
+            echo "  1. Go to repository Settings > Secrets and variables > Actions"
+            echo "  2. Add a new secret named 'COPILOT_GITHUB_TOKEN'"
+            echo "  3. Value: A Personal Access Token with Copilot permissions"
             echo ""
-            echo "Option 2: Ensure GITHUB_TOKEN has Copilot permissions"
-            echo "  • GITHUB_TOKEN is automatically available but may need Copilot scope"
-            echo "  • Check workflow permissions in repository settings"
-            echo ""
-            echo "To create a Fine-Grained Personal Access Token:"
-            echo "  1. Go to GitHub Settings > Developer settings > Personal access tokens > Fine-grained tokens"
-            echo "  2. Generate a new token with 'copilot' scope/permissions"
-            echo "  3. Add it as a repository secret named 'copilot_token'"
+            echo "To create a Personal Access Token:"
+            echo "  1. Go to GitHub Settings > Developer settings > Personal access tokens > Tokens (classic)"
+            echo "  2. Generate a new token (classic) with 'repo' scope"
+            echo "  3. Add it as a repository secret named 'COPILOT_GITHUB_TOKEN'"
             echo ""
             exit 1
           else
-            echo "✅ Authentication token is configured"
-            if [ -n "$COPILOT_TOKEN" ]; then
-              echo "   Using copilot_token secret"
-            else
-              echo "   Using GITHUB_TOKEN (automatically available)"
-            fi
+            echo "✅ COPILOT_GITHUB_TOKEN secret is configured"
           fi
 
       - name: Test Copilot CLI Authentication
         env:
-          COPILOT_GITHUB_TOKEN: ${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
         run: |
           echo "Testing Copilot CLI authentication using COPILOT_GITHUB_TOKEN..."
           # Test with a simple prompt to verify authentication works
@@ -255,11 +239,9 @@ jobs:
       - name: Generate markdown links
         working-directory: ./website
         env:
-          # Copilot CLI checks tokens in this order: COPILOT_GITHUB_TOKEN, GH_TOKEN, GITHUB_TOKEN
-          # We set COPILOT_GITHUB_TOKEN first so it's prioritized
-          COPILOT_GITHUB_TOKEN: ${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}
-          GH_TOKEN: ${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}
+          # Only use COPILOT_GITHUB_TOKEN - copilot CLI checks this first
+          # No GITHUB_TOKEN or GH_TOKEN - only COPILOT_GITHUB_TOKEN
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
           CONTENT_FOLDER: ${{ inputs.content_folder }}
           CUSTOM_PROMPT: ${{ inputs.custom_prompt }}
           DEFAULT_PROMPT: ${{ steps.read-prompt.outputs.prompt }}
