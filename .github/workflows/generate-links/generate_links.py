@@ -58,10 +58,34 @@ Please provide the updated markdown with internal links added. Return only the u
             env={**os.environ, 'GITHUB_TOKEN': github_token}
         )
         
+        # Check for errors first - fail immediately if any error is detected
+        if result.stderr:
+            error_msg = result.stderr.lower()
+            # Check for authentication errors specifically
+            if any(keyword in error_msg for keyword in ['no authentication', 'authentication information', 'not authenticated', 'login']):
+                print(f"copilot CLI error: {result.stderr}", file=sys.stderr)
+                print("❌ Copilot CLI authentication failed. Exiting immediately.", file=sys.stderr)
+                sys.exit(1)
+            # Check for any other errors in stderr
+            if 'error:' in error_msg:
+                print(f"copilot CLI error: {result.stderr}", file=sys.stderr)
+                print(f"❌ Copilot CLI failed. Exiting immediately.", file=sys.stderr)
+                sys.exit(1)
+        
+        # Fail immediately for any non-zero return code
+        if result.returncode != 0:
+            if result.stderr:
+                print(f"copilot CLI error: {result.stderr}", file=sys.stderr)
+            print(f"❌ Copilot CLI failed with return code {result.returncode}. Exiting immediately.", file=sys.stderr)
+            sys.exit(1)
+        
+        # Only return if we have valid output
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
-        elif result.stderr:
-            print(f"copilot CLI error: {result.stderr}", file=sys.stderr)
+        
+        # If we get here, something unexpected happened
+        print("❌ Copilot CLI returned unexpected result. Exiting immediately.", file=sys.stderr)
+        sys.exit(1)
     except FileNotFoundError:
         print("Warning: GitHub Copilot CLI not found. Trying GitHub API...", file=sys.stderr)
     except subprocess.TimeoutExpired:
