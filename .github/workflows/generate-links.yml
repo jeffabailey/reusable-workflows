@@ -265,7 +265,7 @@ jobs:
 
       - name: Get published blog posts list
         id: hugo-list
-        working-directory: ./website
+        working-directory: ./website/hugo
         run: |
           # Run hugo list to get published posts
           # This will be passed to the script for internal link optimization
@@ -273,21 +273,25 @@ jobs:
           # Limit to 10 published posts to avoid processing too many files at once
           echo "Running hugo list all to get published posts..."
           hugo list all > /tmp/hugo_list_full.csv || {
-            echo "⚠️  hugo list failed, script will work without post list"
-            echo "" > /tmp/hugo_list_full.csv
+            echo "❌ Hugo list command failed"
+            exit 1
           }
+          
+          # Check if CSV has data rows (more than just header)
+          TOTAL_LINES=$(wc -l < /tmp/hugo_list_full.csv)
+          if [ "$TOTAL_LINES" -le 1 ]; then
+            echo "❌ Hugo list CSV contains no data rows (only header or empty)"
+            echo "   This indicates no content was found or Hugo configuration issue"
+            exit 1
+          fi
           
           # Pass all CSV data to Python script for robust parsing
           # Python will filter for draft=false and limit to 10 posts
-          if [ -s /tmp/hugo_list_full.csv ]; then
-            cp /tmp/hugo_list_full.csv /tmp/hugo_list.csv
-          else
-            echo "" > /tmp/hugo_list.csv
-          fi
+          cp /tmp/hugo_list_full.csv /tmp/hugo_list.csv
           
-          echo "✅ Generated hugo list (total lines: $(wc -l < /tmp/hugo_list_full.csv))"
+          echo "✅ Generated hugo list (total lines: $TOTAL_LINES)"
           echo "   Python script will filter for published posts (draft=false) and limit to 10"
-          # Output the limited list for the script to use
+          # Output the list for the script to use
           {
             echo 'hugo_list<<EOF'
             cat /tmp/hugo_list.csv
@@ -339,14 +343,9 @@ jobs:
 
       - name: Build Hugo to verify links
         if: steps.check-changes.outputs.changes == 'true'
-        working-directory: ./website
+        working-directory: ./website/hugo
         run: |
           echo "Building Hugo site to verify all links are valid..."
-          # Hugo config is in the hugo subdirectory
-          cd hugo || {
-            echo "❌ Hugo directory not found"
-            exit 1
-          }
           hugo --minify --quiet || {
             echo "❌ Hugo build failed - there may be broken links"
             echo "   Check the build output above for errors"
