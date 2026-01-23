@@ -23,16 +23,37 @@ on:
         required: false
         type: boolean
         default: false
+      s3_bucket_name:
+        required: false
+        type: string
+        description: "S3 bucket name for deployment (required if auto_deploy is true)"
+      cloudfront_distribution_id:
+        required: false
+        type: string
+        description: "CloudFront distribution ID for deployment (required if auto_deploy is true)"
+      auto_deploy:
+        required: false
+        type: boolean
+        default: false
+        description: "Automatically deploy after generating links"
     secrets:
       access_token:
         required: true
       COPILOT_GITHUB_TOKEN:
         required: true
         description: "GitHub token with Copilot API access (must be named COPILOT_GITHUB_TOKEN)"
+      aws_access_key_id:
+        required: false
+        description: "AWS access key ID (required if auto_deploy is true)"
+      aws_secret_access_key:
+        required: false
+        description: "AWS secret access key (required if auto_deploy is true)"
 
 jobs:
   generateLinks:
     name: "Generate Markdown Links"
+    outputs:
+      changes: ${{ steps.check-changes.outputs.changes }}
     runs-on: ubuntu-latest
 
     steps:
@@ -236,6 +257,30 @@ jobs:
           fi
           echo "✅ Successfully copied script to website repository"
 
+      - name: Get published blog posts list
+        id: hugo-list
+        working-directory: ./website
+        run: |
+          # Run hugo list to get published posts
+          # This will be passed to the script for internal link optimization
+          if command -v hugo > /dev/null 2>&1; then
+            echo "Running hugo list all to get published posts..."
+            hugo list all --format csv > /tmp/hugo_list.csv || {
+              echo "⚠️  hugo list failed, script will work without post list"
+              echo "" > /tmp/hugo_list.csv
+            }
+            echo "✅ Generated hugo list (lines: $(wc -l < /tmp/hugo_list.csv))"
+          else
+            echo "⚠️  Hugo not found, script will work without post list"
+            echo "" > /tmp/hugo_list.csv
+          fi
+          # Output the list for the script to use
+          {
+            echo 'hugo_list<<EOF'
+            cat /tmp/hugo_list.csv
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Generate markdown links
         working-directory: ./website
         env:
@@ -245,6 +290,7 @@ jobs:
           CONTENT_FOLDER: ${{ inputs.content_folder }}
           CUSTOM_PROMPT: ${{ inputs.custom_prompt }}
           DEFAULT_PROMPT: ${{ steps.read-prompt.outputs.prompt }}
+          HUGO_LIST_CSV: ${{ steps.hugo-list.outputs.hugo_list }}
           DEBUG: ${{ inputs.debug }}
         run: |
           python3 .github/workflows/generate-links/generate_links.py
@@ -265,18 +311,66 @@ jobs:
             echo "changes=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: List updated files
+        if: steps.check-changes.outputs.changes == 'true'
+        working-directory: ./website
+        id: list-updated
+        run: |
+          echo "Files updated:"
+          git diff --name-only HEAD || echo "No changes to list"
+          UPDATED_FILES=$(git diff --name-only HEAD 2>/dev/null | tr '\n' ',' | sed 's/,$//' || echo "")
+          echo "updated_files=$UPDATED_FILES" >> "$GITHUB_OUTPUT"
+          if [ -n "$UPDATED_FILES" ]; then
+            echo "Updated files: $UPDATED_FILES"
+          fi
+
+      - name: Build Hugo to verify links
+        if: steps.check-changes.outputs.changes == 'true'
+        working-directory: ./website
+        run: |
+          echo "Building Hugo site to verify all links are valid..."
+          if command -v hugo > /dev/null 2>&1; then
+            hugo --minify --quiet || {
+              echo "❌ Hugo build failed - there may be broken links"
+              echo "   Check the build output above for errors"
+              exit 1
+            }
+            echo "✅ Hugo build completed successfully - all links are valid"
+          else
+            echo "⚠️  Hugo not found, skipping build verification"
+          fi
+
       - name: Commit changes
         if: steps.check-changes.outputs.changes == 'true'
         working-directory: ./website
         run: |
           git add -A
-          git commit -m "chore: generate markdown links via GitHub Copilot" || exit 0
+          git commit -m "chore: optimize internal links via GitHub Copilot" || exit 0
           git push || echo "Warning: Failed to push changes. This may be expected if the branch is protected."
+
 
       - name: Summary
         run: |
           if [ "${{ steps.check-changes.outputs.changes }}" == "true" ]; then
             echo "✅ Successfully generated and committed markdown links"
+            if [ -n "${{ steps.list-updated.outputs.updated_files }}" ]; then
+              echo "📝 Updated files: ${{ steps.list-updated.outputs.updated_files }}"
+            fi
           else
             echo "ℹ️ No changes were made to markdown files"
           fi
+
+  deploy:
+    name: "Deploy Website"
+    needs: generateLinks
+    if: needs.generateLinks.outputs.changes == 'true' && inputs.auto_deploy == true
+    uses: jeffabailey/reusable-workflows/.github/workflows/hugo-deploy.yml@master
+    with:
+      website_repository: ${{ inputs.website_repository }}
+      s3_bucket_name: ${{ inputs.s3_bucket_name }}
+      cloudfront_distribution_id: ${{ inputs.cloudfront_distribution_id }}
+      debug: ${{ inputs.debug }}
+    secrets:
+      aws_access_key_id: ${{ secrets.aws_access_key_id }}
+      aws_secret_access_key: ${{ secrets.aws_secret_access_key }}
+      access_token: ${{ secrets.access_token }}

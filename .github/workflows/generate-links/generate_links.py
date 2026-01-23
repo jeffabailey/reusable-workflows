@@ -92,14 +92,28 @@ Please provide the updated markdown with internal links added. Return only the u
         if debug_flag == 'true':
             print(f"Running copilot with COPILOT_GITHUB_TOKEN:")
             print(f"  COPILOT_GITHUB_TOKEN length: {len(clean_token)}")
+            print(f"  Prompt length: {len(full_prompt)} characters")
+            print(f"  Command: {' '.join(copilot_cmd[:3])} ... [prompt] --allow-all-tools --silent")
         
-        result = subprocess.run(
-            copilot_cmd,
-            capture_output=True,
-            text=True,
-            timeout=300,
-            env=subprocess_env
-        )
+        print("Calling copilot CLI (this may take a moment)...", flush=True)
+        try:
+            result = subprocess.run(
+                copilot_cmd,
+                capture_output=True,
+                text=True,
+                timeout=300,  # 5 minute timeout
+                env=subprocess_env
+            )
+            if debug_flag == 'true':
+                print(f"Copilot CLI completed with return code: {result.returncode}")
+                if result.stdout:
+                    print(f"  stdout length: {len(result.stdout)} characters")
+                if result.stderr:
+                    print(f"  stderr length: {len(result.stderr)} characters")
+        except subprocess.TimeoutExpired:
+            print("❌ Copilot CLI timed out after 5 minutes", file=sys.stderr)
+            print("   This may indicate the prompt is too long or copilot CLI is unresponsive", file=sys.stderr)
+            sys.exit(1)
         
         # Check for errors first - fail immediately if any error is detected
         if result.stderr:
@@ -163,7 +177,8 @@ def process_markdown_file(
     file_path: Path,
     prompt: str,
     github_token: str,
-    dry_run: bool = False
+    dry_run: bool = False,
+    hugo_list_csv: str = ''
 ) -> bool:
     """
     Process a single markdown file to add internal links.
@@ -175,9 +190,30 @@ def process_markdown_file(
         with open(file_path, 'r', encoding='utf-8') as f:
             original_content = f.read()
         
+        # Enhance prompt with Hugo list data if available
+        enhanced_prompt = prompt
+        if hugo_list_csv and hugo_list_csv.strip():
+            enhanced_prompt = f"""{prompt}
+
+## Published Blog Posts Data
+
+The following CSV data contains all published blog posts from `hugo list all`:
+
+```
+{hugo_list_csv}
+```
+
+Use this data to identify which posts are published and available for internal linking. Filter by:
+- `draft=false` (only published posts)
+- Posts in the `content/blog` directory
+- Exclude `_index.md` files
+
+When adding internal links, reference posts from this list using their `path` or `permalink` values.
+"""
+        
         # Get updated content from GitHub Copilot
         updated_content = get_github_copilot_response(
-            prompt,
+            enhanced_prompt,
             original_content,
             github_token
         )
@@ -214,6 +250,7 @@ def main():
     content_folder = os.environ.get('CONTENT_FOLDER', 'content/blog')
     custom_prompt = os.environ.get('CUSTOM_PROMPT', '')
     default_prompt = os.environ.get('DEFAULT_PROMPT', '')
+    hugo_list_csv = os.environ.get('HUGO_LIST_CSV', '')
     debug = os.environ.get('DEBUG', 'false').lower() == 'true'
     dry_run = os.environ.get('DRY_RUN', 'false').lower() == 'true'
     
@@ -245,6 +282,10 @@ def main():
         print(f"Prompt length: {len(prompt)} characters")
         print(f"Using custom prompt: {bool(custom_prompt)}")
         print(f"Dry run: {dry_run}")
+        if hugo_list_csv:
+            print(f"Hugo list CSV provided: {len(hugo_list_csv)} characters")
+        else:
+            print("No Hugo list CSV provided")
     
     # Find all markdown files in the content folder
     content_path = Path(content_folder)
@@ -273,7 +314,7 @@ def main():
             print(f"\nProcessing: {md_file}")
         
         try:
-            if process_markdown_file(md_file, prompt, github_token, dry_run):
+            if process_markdown_file(md_file, prompt, github_token, dry_run, hugo_list_csv):
                 changes_made += 1
         except Exception as e:
             errors += 1
