@@ -50,12 +50,19 @@ Please provide the updated markdown with internal links added. Return only the u
         # Note: This requires GitHub Copilot subscription and the Copilot CLI
         # --allow-all-tools is required for non-interactive mode
         # --silent outputs only the agent response (useful for scripting)
+        # Copilot CLI checks for tokens in this order: COPILOT_GITHUB_TOKEN, GH_TOKEN, GITHUB_TOKEN
+        # Set all three to ensure authentication works
+        subprocess_env = {**os.environ}
+        subprocess_env['GITHUB_TOKEN'] = github_token
+        subprocess_env['GH_TOKEN'] = github_token
+        subprocess_env['COPILOT_GITHUB_TOKEN'] = github_token
+        
         result = subprocess.run(
             ['copilot', '-p', full_prompt, '--allow-all-tools', '--silent'],
             capture_output=True,
             text=True,
             timeout=300,  # Increased timeout for Copilot CLI
-            env={**os.environ, 'GITHUB_TOKEN': github_token}
+            env=subprocess_env
         )
         
         # Check for errors first - fail immediately if any error is detected
@@ -166,7 +173,12 @@ def process_markdown_file(
 def main():
     """Main entry point for the script."""
     # Get environment variables
-    github_token = os.environ.get('GITHUB_TOKEN')
+    # Copilot CLI checks for tokens in this order: COPILOT_GITHUB_TOKEN, GH_TOKEN, GITHUB_TOKEN
+    github_token = (
+        os.environ.get('COPILOT_GITHUB_TOKEN') or
+        os.environ.get('GH_TOKEN') or
+        os.environ.get('GITHUB_TOKEN')
+    )
     content_folder = os.environ.get('CONTENT_FOLDER', 'content/blog')
     custom_prompt = os.environ.get('CUSTOM_PROMPT', '')
     default_prompt = os.environ.get('DEFAULT_PROMPT', '')
@@ -174,7 +186,10 @@ def main():
     dry_run = os.environ.get('DRY_RUN', 'false').lower() == 'true'
     
     if not github_token:
-        print("Error: GITHUB_TOKEN environment variable is required", file=sys.stderr)
+        print("Error: One of the following environment variables is required:", file=sys.stderr)
+        print("  - COPILOT_GITHUB_TOKEN", file=sys.stderr)
+        print("  - GH_TOKEN", file=sys.stderr)
+        print("  - GITHUB_TOKEN", file=sys.stderr)
         sys.exit(1)
     
     # Use custom prompt if provided, otherwise use default
