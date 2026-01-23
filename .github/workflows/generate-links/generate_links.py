@@ -20,6 +20,7 @@ import os
 import sys
 import subprocess
 import json
+import shlex
 from pathlib import Path
 from typing import List, Optional
 
@@ -79,8 +80,16 @@ Please provide the updated markdown with internal links added. Return only the u
             if 'GITHUB_TOKEN' in subprocess_env:
                 print(f"    GITHUB_TOKEN length in env: {len(subprocess_env['GITHUB_TOKEN'])}")
         
+        # Use shell to ensure environment variables are properly exported
+        # Copilot CLI may not read env vars when passed via subprocess.run env parameter
+        # So we'll use a shell command that exports them first
+        escaped_prompt = shlex.quote(full_prompt)
+        escaped_token = shlex.quote(clean_token)
+        copilot_cmd = f"export GITHUB_TOKEN={escaped_token} && export GH_TOKEN={escaped_token} && export COPILOT_GITHUB_TOKEN={escaped_token} && copilot -p {escaped_prompt} --allow-all-tools --silent"
+        
         result = subprocess.run(
-            ['copilot', '-p', full_prompt, '--allow-all-tools', '--silent'],
+            copilot_cmd,
+            shell=True,
             capture_output=True,
             text=True,
             timeout=300,  # Increased timeout for Copilot CLI
