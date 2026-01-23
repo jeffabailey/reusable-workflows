@@ -36,6 +36,38 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Display Token for Verification
+        env:
+          GITHUB_TOKEN: ${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}
+        run: |
+          # Determine which token source is being used
+          if [ -n "${{ secrets.copilot_token }}" ]; then
+            TOKEN_SOURCE="copilot_token secret"
+            TOKEN="${{ secrets.copilot_token }}"
+          else
+            TOKEN_SOURCE="GITHUB_TOKEN (automatically available)"
+            TOKEN="${{ secrets.GITHUB_TOKEN }}"
+          fi
+          
+          echo "Token source: ${TOKEN_SOURCE}"
+          if [ -n "$TOKEN" ]; then
+            TOKEN_LEN=${#TOKEN}
+            if [ $TOKEN_LEN -gt 8 ]; then
+              TOKEN_PREFIX="${TOKEN:0:8}"
+              TOKEN_SUFFIX="${TOKEN: -8}"
+              echo "Token verification (first 8 + last 8 chars): ${TOKEN_PREFIX}...${TOKEN_SUFFIX}"
+              echo "Token length: ${TOKEN_LEN} characters"
+              echo "Token prefix: ${TOKEN_PREFIX}"
+            else
+              echo "Token length: ${TOKEN_LEN} characters (too short to display safely)"
+            fi
+          else
+            echo "❌ No token available"
+            exit 1
+          fi
+
       - name: Checkout reusable workflows
         uses: actions/checkout@v4
         with:
@@ -128,29 +160,6 @@ jobs:
             else
               echo "   Using GITHUB_TOKEN (automatically available)"
             fi
-          fi
-
-      - name: Display Token for Verification
-        env:
-          GITHUB_TOKEN: ${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}
-          GH_TOKEN: ${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}
-          COPILOT_GITHUB_TOKEN: ${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}
-        run: |
-          TOKEN="${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}"
-          if [ -n "$TOKEN" ]; then
-            TOKEN_LEN=${#TOKEN}
-            if [ $TOKEN_LEN -gt 8 ]; then
-              TOKEN_PREFIX="${TOKEN:0:8}"
-              TOKEN_SUFFIX="${TOKEN: -8}"
-              echo "Token verification (first 8 + last 8 chars): ${TOKEN_PREFIX}...${TOKEN_SUFFIX}"
-              echo "Token length: ${TOKEN_LEN} characters"
-              echo "Token prefix: ${TOKEN_PREFIX}"
-            else
-              echo "Token length: ${TOKEN_LEN} characters (too short to display safely)"
-            fi
-          else
-            echo "❌ No token available"
-            exit 1
           fi
 
       - name: Test Copilot CLI Authentication
