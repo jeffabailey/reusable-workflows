@@ -164,28 +164,24 @@ jobs:
 
       - name: Test Copilot CLI Authentication
         env:
-          GITHUB_TOKEN: ${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}
-          GH_TOKEN: ${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}
           COPILOT_GITHUB_TOKEN: ${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}
         run: |
-          echo "Testing Copilot CLI authentication..."
+          echo "Testing Copilot CLI authentication using COPILOT_GITHUB_TOKEN..."
           # Test with a simple prompt to verify authentication works
-          # Use env command to explicitly set the token
-          TEST_TOKEN="${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}"
-          if [ -z "$TEST_TOKEN" ]; then
-            echo "❌ No token available for testing"
+          # Copilot CLI checks COPILOT_GITHUB_TOKEN first, so we prioritize that
+          if [ -z "$COPILOT_GITHUB_TOKEN" ]; then
+            echo "❌ COPILOT_GITHUB_TOKEN is not set"
             exit 1
           fi
           
-          # Test copilot CLI with a minimal prompt
+          # Test copilot CLI with a minimal prompt using COPILOT_GITHUB_TOKEN
           # This will fail immediately if authentication doesn't work
-          if env GITHUB_TOKEN="$TEST_TOKEN" GH_TOKEN="$TEST_TOKEN" COPILOT_GITHUB_TOKEN="$TEST_TOKEN" \
-             copilot -p "test" --allow-all-tools --silent > /dev/null 2>&1; then
-            echo "✅ Copilot CLI authentication test passed"
+          if copilot -p "test" --allow-all-tools --silent > /dev/null 2>&1; then
+            echo "✅ Copilot CLI authentication test passed (using COPILOT_GITHUB_TOKEN)"
           else
             echo "❌ Copilot CLI authentication test failed"
             echo ""
-            echo "The token is configured but copilot CLI cannot authenticate with it."
+            echo "The COPILOT_GITHUB_TOKEN is set but copilot CLI cannot authenticate with it."
             echo "This may indicate:"
             echo "  • The token has expired"
             echo "  • The token doesn't have Copilot permissions"
@@ -259,11 +255,11 @@ jobs:
       - name: Generate markdown links
         working-directory: ./website
         env:
-          # Copilot CLI uses GITHUB_TOKEN, GH_TOKEN, or COPILOT_GITHUB_TOKEN
-          # Prefer copilot_token if set, otherwise use GITHUB_TOKEN
-          GITHUB_TOKEN: ${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}
+          # Copilot CLI checks tokens in this order: COPILOT_GITHUB_TOKEN, GH_TOKEN, GITHUB_TOKEN
+          # We set COPILOT_GITHUB_TOKEN first so it's prioritized
           COPILOT_GITHUB_TOKEN: ${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.copilot_token || secrets.GITHUB_TOKEN }}
           CONTENT_FOLDER: ${{ inputs.content_folder }}
           CUSTOM_PROMPT: ${{ inputs.custom_prompt }}
           DEFAULT_PROMPT: ${{ steps.read-prompt.outputs.prompt }}
