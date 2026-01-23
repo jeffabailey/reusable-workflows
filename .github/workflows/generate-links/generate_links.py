@@ -21,6 +21,7 @@ import sys
 import subprocess
 import json
 import shlex
+import tempfile
 from pathlib import Path
 from typing import List, Optional
 
@@ -80,21 +81,32 @@ Please provide the updated markdown with internal links added. Return only the u
             if 'GITHUB_TOKEN' in subprocess_env:
                 print(f"    GITHUB_TOKEN length in env: {len(subprocess_env['GITHUB_TOKEN'])}")
         
-        # Use shell to ensure environment variables are properly exported
-        # Copilot CLI may not read env vars when passed via subprocess.run env parameter
-        # So we'll use a shell command that exports them first
-        escaped_prompt = shlex.quote(full_prompt)
-        escaped_token = shlex.quote(clean_token)
-        copilot_cmd = f"export GITHUB_TOKEN={escaped_token} && export GH_TOKEN={escaped_token} && export COPILOT_GITHUB_TOKEN={escaped_token} && copilot -p {escaped_prompt} --allow-all-tools --silent"
+        # Use a wrapper script approach to ensure environment variables are set
+        # Write a temporary script that exports vars and runs copilot
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False) as f:
+            f.write(f"""#!/bin/bash
+export GITHUB_TOKEN={shlex.quote(clean_token)}
+export GH_TOKEN={shlex.quote(clean_token)}
+export COPILOT_GITHUB_TOKEN={shlex.quote(clean_token)}
+exec copilot -p {shlex.quote(full_prompt)} --allow-all-tools --silent
+""")
+            script_path = f.name
         
-        result = subprocess.run(
-            copilot_cmd,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=300,  # Increased timeout for Copilot CLI
-            env=subprocess_env
-        )
+        try:
+            os.chmod(script_path, 0o755)
+            result = subprocess.run(
+                ['/bin/bash', script_path],
+                capture_output=True,
+                text=True,
+                timeout=300,
+                env=subprocess_env
+            )
+        finally:
+            # Clean up temp file
+            try:
+                os.unlink(script_path)
+            except:
+                pass
         
         # Check for errors first - fail immediately if any error is detected
         if result.stderr:
