@@ -27,7 +27,7 @@ from typing import List, Dict, Optional, Tuple
 from difflib import unified_diff
 
 
-def parse_hugo_csv(hugo_list_csv: str) -> Dict[str, Dict]:
+def parse_hugo_csv(hugo_list_csv: str, debug: bool = False) -> Dict[str, Dict]:
     """
     Parse Hugo list CSV to extract published posts.
     
@@ -36,24 +36,71 @@ def parse_hugo_csv(hugo_list_csv: str) -> Dict[str, Dict]:
     published_posts = {}
     
     if not hugo_list_csv or not hugo_list_csv.strip():
+        if debug:
+            print("Hugo CSV is empty or not provided")
         return published_posts
     
     try:
         # Parse CSV
         reader = csv.DictReader(io.StringIO(hugo_list_csv))
+        
+        # Get column names for debugging
+        if debug:
+            print(f"CSV columns: {reader.fieldnames}")
+            print(f"CSV content preview (first 500 chars): {hugo_list_csv[:500]}")
+        
+        row_count = 0
         for row in reader:
-            # Only include published posts (draft=false)
-            if row.get('draft', '').lower() == 'false':
-                path = row.get('path', '')
+            row_count += 1
+            if debug and row_count <= 3:
+                print(f"Sample row {row_count}: {dict(row)}")
+            
+            # Check draft status - try multiple column name variations and formats
+            draft_value = None
+            for key in ['draft', 'Draft', 'DRAFT', 'isDraft', 'is_draft']:
+                if key in row:
+                    draft_value = row[key]
+                    break
+            
+            # Also check if draft column exists but is empty (defaults to false in Hugo)
+            if draft_value is None:
+                # If no draft column found, assume published (Hugo default)
+                draft_value = 'false'
+            
+            # Normalize draft value - could be "false", "False", "FALSE", "0", etc.
+            draft_str = str(draft_value).strip().lower()
+            is_published = draft_str in ['false', '0', 'no', 'n', '']
+            
+            if debug and row_count <= 3:
+                print(f"  Draft value: {repr(draft_value)} -> {draft_str} -> published: {is_published}")
+            
+            # Only include published posts
+            if is_published:
+                path = row.get('path', '') or row.get('Path', '') or row.get('PATH', '')
                 if path:
                     published_posts[path] = {
                         'path': path,
-                        'permalink': row.get('permalink', ''),
-                        'title': row.get('title', ''),
-                        'draft': row.get('draft', 'false')
+                        'permalink': row.get('permalink', '') or row.get('Permalink', '') or row.get('PERMALINK', ''),
+                        'title': row.get('title', '') or row.get('Title', '') or row.get('TITLE', ''),
+                        'draft': draft_str
                     }
+        
+        if debug:
+            print(f"Processed {row_count} rows, found {len(published_posts)} published posts")
+        
+        # Limit to 10 published posts (as per workflow requirement)
+        if len(published_posts) > 10:
+            if debug:
+                print(f"Limiting from {len(published_posts)} to 10 published posts")
+            # Convert to list, take first 10, convert back to dict
+            limited_posts = dict(list(published_posts.items())[:10])
+            published_posts = limited_posts
+    
     except Exception as e:
         print(f"⚠️  Warning: Could not parse Hugo CSV: {e}", file=sys.stderr)
+        if debug:
+            import traceback
+            traceback.print_exc()
         print("   Continuing without published posts list...", file=sys.stderr)
     
     return published_posts
@@ -404,7 +451,7 @@ def main():
         sys.exit(1)
     
     # Parse Hugo CSV to get published posts
-    published_posts = parse_hugo_csv(hugo_list_csv)
+    published_posts = parse_hugo_csv(hugo_list_csv, debug=debug)
     
     if debug:
         print(f"Content folder: {content_folder}")

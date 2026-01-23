@@ -277,17 +277,16 @@ jobs:
             echo "" > /tmp/hugo_list_full.csv
           }
           
-          # Filter to only published posts (draft=false) and limit to 10 posts
+          # Pass all CSV data to Python script for robust parsing
+          # Python will filter for draft=false and limit to 10 posts
           if [ -s /tmp/hugo_list_full.csv ]; then
-            # Keep header row, filter for draft=false, then take first 10 data rows
-            head -1 /tmp/hugo_list_full.csv > /tmp/hugo_list.csv
-            grep -i ",false," /tmp/hugo_list_full.csv | head -10 >> /tmp/hugo_list.csv || true
+            cp /tmp/hugo_list_full.csv /tmp/hugo_list.csv
           else
             echo "" > /tmp/hugo_list.csv
           fi
           
-          echo "✅ Generated hugo list (total lines: $(wc -l < /tmp/hugo_list_full.csv), limited to 10 published posts)"
-          echo "   Published posts in list: $(($(wc -l < /tmp/hugo_list.csv) - 1))"
+          echo "✅ Generated hugo list (total lines: $(wc -l < /tmp/hugo_list_full.csv))"
+          echo "   Python script will filter for published posts (draft=false) and limit to 10"
           # Output the limited list for the script to use
           {
             echo 'hugo_list<<EOF'
@@ -343,6 +342,11 @@ jobs:
         working-directory: ./website
         run: |
           echo "Building Hugo site to verify all links are valid..."
+          # Hugo config is in the hugo subdirectory
+          cd hugo || {
+            echo "❌ Hugo directory not found"
+            exit 1
+          }
           hugo --minify --quiet || {
             echo "❌ Hugo build failed - there may be broken links"
             echo "   Check the build output above for errors"
