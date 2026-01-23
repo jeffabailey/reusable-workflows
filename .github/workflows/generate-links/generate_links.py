@@ -292,30 +292,70 @@ Please process all {len(files_content)} files and return the updated content wit
         
         debug_flag = os.environ.get('DEBUG', 'false').lower() == 'true'
         
-        copilot_cmd = [
-            'env',
-            f'COPILOT_GITHUB_TOKEN={clean_token}',
-            'copilot',
-            '-p', full_prompt,
-            '--allow-all-tools',
-            '--silent'
-        ]
+        # Determine the best way to pass the prompt based on size
+        # Large prompts (>100KB) need to use stdin to avoid "Argument list too long" errors
+        PROMPT_SIZE_LIMIT = 100 * 1024  # 100KB
+        use_stdin = len(full_prompt.encode('utf-8')) > PROMPT_SIZE_LIMIT
         
-        if debug_flag:
-            print(f"Running copilot with COPILOT_GITHUB_TOKEN:")
-            print(f"  Processing {len(files_content)} files in a single call")
-            print(f"  Prompt length: {len(full_prompt)} characters")
-        
-        print(f"Calling copilot CLI to process {len(files_content)} files (this may take a moment)...", flush=True)
+        if use_stdin:
+            # Write prompt to temporary file to avoid "Argument list too long" errors
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as tmp_file:
+                tmp_file.write(full_prompt)
+                tmp_prompt_file = tmp_file.name
+        else:
+            tmp_prompt_file = None
         
         try:
-            result = subprocess.run(
-                copilot_cmd,
-                capture_output=True,
-                text=True,
-                timeout=600,  # 10 minute timeout for batch processing
-                env=subprocess_env
-            )
+            if use_stdin:
+                # Use stdin for large prompts
+                copilot_cmd = [
+                    'copilot',
+                    '-p', '-',  # Read from stdin
+                    '--allow-all-tools',
+                    '--silent'
+                ]
+                
+                if debug_flag:
+                    print(f"Running copilot with COPILOT_GITHUB_TOKEN:")
+                    print(f"  Processing {len(files_content)} files in a single call")
+                    print(f"  Prompt length: {len(full_prompt)} characters (using stdin)")
+                
+                print(f"Calling copilot CLI to process {len(files_content)} files (this may take a moment)...", flush=True)
+                
+                # Read the prompt file and pass via stdin
+                with open(tmp_prompt_file, 'r', encoding='utf-8') as prompt_file:
+                    result = subprocess.run(
+                        copilot_cmd,
+                        stdin=prompt_file,
+                        capture_output=True,
+                        text=True,
+                        timeout=600,  # 10 minute timeout for batch processing
+                        env=subprocess_env
+                    )
+            else:
+                # Use direct argument for smaller prompts
+                copilot_cmd = [
+                    'copilot',
+                    '-p', full_prompt,
+                    '--allow-all-tools',
+                    '--silent'
+                ]
+                
+                if debug_flag:
+                    print(f"Running copilot with COPILOT_GITHUB_TOKEN:")
+                    print(f"  Processing {len(files_content)} files in a single call")
+                    print(f"  Prompt length: {len(full_prompt)} characters (using direct argument)")
+                
+                print(f"Calling copilot CLI to process {len(files_content)} files (this may take a moment)...", flush=True)
+                
+                result = subprocess.run(
+                    copilot_cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=600,  # 10 minute timeout for batch processing
+                    env=subprocess_env
+                )
             
             if debug_flag:
                 print(f"Copilot CLI completed with return code: {result.returncode}")
@@ -327,6 +367,13 @@ Please process all {len(files_content)} files and return the updated content wit
             print("❌ Copilot CLI timed out after 10 minutes", file=sys.stderr)
             print("   This may indicate too many files or the prompt is too long", file=sys.stderr)
             sys.exit(1)
+        finally:
+            # Clean up temp file if we created one
+            if tmp_prompt_file:
+                try:
+                    os.unlink(tmp_prompt_file)
+                except:
+                    pass
         
         # Check for errors
         if result.stderr:
@@ -479,27 +526,41 @@ def main():
         sys.exit(0)
     
     # Enhance prompt with Hugo list data
+    # Instead of including the full CSV (which can be huge), create a compact summary
     enhanced_prompt = prompt
-    if hugo_list_csv and hugo_list_csv.strip():
+    if published_posts:
+        # Create a compact summary of published posts (path, title, permalink)
+        # This avoids "Argument list too long" errors when passing to copilot CLI
+        posts_summary_lines = []
+        for post_path, post_data in list(published_posts.items())[:50]:  # Limit to 50 for prompt size
+            title = post_data.get('title', '') or post_path
+            permalink = post_data.get('permalink', '')
+            posts_summary_lines.append(f"- {post_path} | {title} | {permalink}")
+        
+        posts_summary = "\n".join(posts_summary_lines)
+        if len(published_posts) > 50:
+            posts_summary += f"\n... and {len(published_posts) - 50} more published posts"
+        
         enhanced_prompt = f"""{prompt}
 
-## Published Blog Posts Data
+## Published Blog Posts Available for Linking
 
-The following CSV data contains all published blog posts from `hugo list all`:
+The following is a list of published blog posts (draft=false) that you can link to:
 
-```
-{hugo_list_csv}
-```
+Format: `path | title | permalink`
 
-**CRITICAL: ONLY link to posts from this list that have `draft=false`.**
+{posts_summary}
+
+**CRITICAL: ONLY link to posts from this list.**
 **CRITICAL: If a post is not in this list, DO NOT create a link to it.**
+**CRITICAL: All posts in this list have `draft=false` and are published.**
 
-Use this data to identify which posts are published and available for internal linking. Filter by:
-- `draft=false` (only published posts)
-- Posts in the `content/blog` directory
-- Exclude `_index.md` files
+When adding internal links, use the `permalink` value from this list for the link URL.
+For Hugo sites, you can use either:
+- Markdown links: `[text](permalink)`
+- Hugo relref shortcodes: `{{{{< relref "path" >}}}}`
 
-When adding internal links, reference posts from this list using their `path` or `permalink` values.
+Only link to posts that are relevant and add value to the content.
 """
     
     # Find published files
