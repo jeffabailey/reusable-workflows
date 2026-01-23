@@ -73,17 +73,10 @@ def find_published_files(content_folder: str, published_posts: Dict[str, Dict]) 
     # Find all markdown files
     all_md_files = list(content_path.rglob('*.md'))
     
-    # If no published posts list, return all non-excluded files
+    # If no published posts list provided, return empty list (don't process anything)
+    # This ensures we only process files that are explicitly in the Hugo published list
     if not published_posts:
-        published_files = [
-            f for f in all_md_files
-            if 'node_modules' not in str(f) 
-            and '.git' not in str(f)
-            and f.name != 'notes.md'
-            and f.name != 'links.md'
-            and f.name != '_index.md'
-        ]
-        return published_files
+        return []
     
     # Build a set of normalized published post paths for quick lookup
     published_paths = set()
@@ -420,6 +413,12 @@ def main():
         print(f"Dry run: {dry_run}")
         print(f"Found {len(published_posts)} published posts in Hugo list")
     
+    # If Hugo list was provided but has no published posts, exit
+    if hugo_list_csv and hugo_list_csv.strip() and len(published_posts) == 0:
+        print("⚠️  Hugo list CSV was provided but contains no published posts (draft=false)")
+        print("   Exiting - cannot process files without published posts list")
+        sys.exit(0)
+    
     # Enhance prompt with Hugo list data
     enhanced_prompt = prompt
     if hugo_list_csv and hugo_list_csv.strip():
@@ -451,8 +450,20 @@ When adding internal links, reference posts from this list using their `path` or
         print(f"Found {len(published_files)} published markdown files to process")
     
     if not published_files:
-        print("No published markdown files found to process")
+        if published_posts:
+            print("⚠️  Warning: Hugo list contains published posts but no matching files were found")
+            print("   This may indicate a path mismatch between Hugo list and file system")
+        else:
+            print("No published markdown files found to process")
+            print("   Either the Hugo list is empty or no files match the published posts")
         sys.exit(0)
+    
+    # Safety check: limit to reasonable number of files to avoid token/argument limits
+    MAX_FILES = 10
+    if len(published_files) > MAX_FILES:
+        print(f"⚠️  Warning: Found {len(published_files)} files, limiting to {MAX_FILES} to avoid processing limits")
+        published_files = published_files[:MAX_FILES]
+        print(f"   Processing first {MAX_FILES} files only")
     
     # Read all files
     files_content = {}

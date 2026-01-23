@@ -270,13 +270,25 @@ jobs:
           # Run hugo list to get published posts
           # This will be passed to the script for internal link optimization
           # Note: hugo list all outputs CSV format by default (no --format flag needed)
+          # Limit to 10 published posts to avoid processing too many files at once
           echo "Running hugo list all to get published posts..."
-          hugo list all > /tmp/hugo_list.csv || {
+          hugo list all > /tmp/hugo_list_full.csv || {
             echo "⚠️  hugo list failed, script will work without post list"
-            echo "" > /tmp/hugo_list.csv
+            echo "" > /tmp/hugo_list_full.csv
           }
-          echo "✅ Generated hugo list (lines: $(wc -l < /tmp/hugo_list.csv))"
-          # Output the list for the script to use
+          
+          # Filter to only published posts (draft=false) and limit to 10 posts
+          if [ -s /tmp/hugo_list_full.csv ]; then
+            # Keep header row, filter for draft=false, then take first 10 data rows
+            head -1 /tmp/hugo_list_full.csv > /tmp/hugo_list.csv
+            grep -i ",false," /tmp/hugo_list_full.csv | head -10 >> /tmp/hugo_list.csv || true
+          else
+            echo "" > /tmp/hugo_list.csv
+          fi
+          
+          echo "✅ Generated hugo list (total lines: $(wc -l < /tmp/hugo_list_full.csv), limited to 10 published posts)"
+          echo "   Published posts in list: $(($(wc -l < /tmp/hugo_list.csv) - 1))"
+          # Output the limited list for the script to use
           {
             echo 'hugo_list<<EOF'
             cat /tmp/hugo_list.csv
