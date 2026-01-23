@@ -257,23 +257,24 @@ jobs:
           fi
           echo "✅ Successfully copied script to website repository"
 
+      - name: Setup Hugo
+        uses: peaceiris/actions-hugo@v2.6.0
+        with:
+          hugo-version: '0.154.5'
+          extended: true
+
       - name: Get published blog posts list
         id: hugo-list
         working-directory: ./website
         run: |
           # Run hugo list to get published posts
           # This will be passed to the script for internal link optimization
-          if command -v hugo > /dev/null 2>&1; then
-            echo "Running hugo list all to get published posts..."
-            hugo list all --format csv > /tmp/hugo_list.csv || {
-              echo "⚠️  hugo list failed, script will work without post list"
-              echo "" > /tmp/hugo_list.csv
-            }
-            echo "✅ Generated hugo list (lines: $(wc -l < /tmp/hugo_list.csv))"
-          else
-            echo "⚠️  Hugo not found, script will work without post list"
+          echo "Running hugo list all to get published posts..."
+          hugo list all --format csv > /tmp/hugo_list.csv || {
+            echo "⚠️  hugo list failed, script will work without post list"
             echo "" > /tmp/hugo_list.csv
-          fi
+          }
+          echo "✅ Generated hugo list (lines: $(wc -l < /tmp/hugo_list.csv))"
           # Output the list for the script to use
           {
             echo 'hugo_list<<EOF'
@@ -329,16 +330,12 @@ jobs:
         working-directory: ./website
         run: |
           echo "Building Hugo site to verify all links are valid..."
-          if command -v hugo > /dev/null 2>&1; then
-            hugo --minify --quiet || {
-              echo "❌ Hugo build failed - there may be broken links"
-              echo "   Check the build output above for errors"
-              exit 1
-            }
-            echo "✅ Hugo build completed successfully - all links are valid"
-          else
-            echo "⚠️  Hugo not found, skipping build verification"
-          fi
+          hugo --minify --quiet || {
+            echo "❌ Hugo build failed - there may be broken links"
+            echo "   Check the build output above for errors"
+            exit 1
+          }
+          echo "✅ Hugo build completed successfully - all links are valid"
 
       - name: Commit changes
         if: steps.check-changes.outputs.changes == 'true'

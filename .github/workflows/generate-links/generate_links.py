@@ -294,13 +294,21 @@ def main():
         sys.exit(1)
     
     # Find markdown files (excluding certain patterns)
+    # CRITICAL: Exclude notes.md files - these are draft/private notes, not published blog posts
+    all_md_files = list(content_path.rglob('*.md'))
+    notes_files = [f for f in all_md_files if f.name == 'notes.md']
     md_files = [
-        f for f in content_path.rglob('*.md')
-        if 'node_modules' not in str(f) and '.git' not in str(f)
+        f for f in all_md_files
+        if 'node_modules' not in str(f) 
+        and '.git' not in str(f)
+        and f.name != 'notes.md'  # Explicitly exclude notes.md files
     ]
     
     if debug:
-        print(f"Found {len(md_files)} markdown files")
+        print(f"Found {len(all_md_files)} total markdown files")
+        if notes_files:
+            print(f"Excluding {len(notes_files)} notes.md files (draft/private notes, not published posts)")
+        print(f"Processing {len(md_files)} markdown files")
     
     if not md_files:
         print("No markdown files found to process")
