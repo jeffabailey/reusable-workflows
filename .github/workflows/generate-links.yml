@@ -269,8 +269,9 @@ jobs:
         run: |
           # Run hugo list to get published posts
           # This will be passed to the script for internal link optimization
+          # Note: hugo list all outputs CSV format by default (no --format flag needed)
           echo "Running hugo list all to get published posts..."
-          hugo list all --format csv > /tmp/hugo_list.csv || {
+          hugo list all > /tmp/hugo_list.csv || {
             echo "⚠️  hugo list failed, script will work without post list"
             echo "" > /tmp/hugo_list.csv
           }
