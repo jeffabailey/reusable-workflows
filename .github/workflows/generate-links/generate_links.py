@@ -52,10 +52,32 @@ Please provide the updated markdown with internal links added. Return only the u
         # --silent outputs only the agent response (useful for scripting)
         # Copilot CLI checks for tokens in this order: COPILOT_GITHUB_TOKEN, GH_TOKEN, GITHUB_TOKEN
         # Set all three to ensure authentication works
+        # Clean the token (remove any whitespace/newlines)
+        clean_token = github_token.strip()
         subprocess_env = {**os.environ}
-        subprocess_env['GITHUB_TOKEN'] = github_token
-        subprocess_env['GH_TOKEN'] = github_token
-        subprocess_env['COPILOT_GITHUB_TOKEN'] = github_token
+        subprocess_env['GITHUB_TOKEN'] = clean_token
+        subprocess_env['GH_TOKEN'] = clean_token
+        subprocess_env['COPILOT_GITHUB_TOKEN'] = clean_token
+        
+        # Verify token is not empty
+        if not clean_token:
+            print("Error: GitHub token is empty or invalid", file=sys.stderr)
+            sys.exit(1)
+        
+        # Debug: Verify environment variables are set (masked)
+        if os.environ.get('DEBUG', 'false').lower() == 'true':
+            print(f"Setting environment variables for copilot CLI:")
+            print(f"  GITHUB_TOKEN: {'*' * min(len(clean_token), 20)}...")
+            print(f"  GH_TOKEN: {'*' * min(len(clean_token), 20)}...")
+            print(f"  COPILOT_GITHUB_TOKEN: {'*' * min(len(clean_token), 20)}...")
+            print(f"  Token length: {len(clean_token)} characters")
+            # Verify the environment variables are actually in the subprocess env
+            print(f"  Verifying subprocess_env has tokens:")
+            print(f"    GITHUB_TOKEN in env: {'GITHUB_TOKEN' in subprocess_env}")
+            print(f"    GH_TOKEN in env: {'GH_TOKEN' in subprocess_env}")
+            print(f"    COPILOT_GITHUB_TOKEN in env: {'COPILOT_GITHUB_TOKEN' in subprocess_env}")
+            if 'GITHUB_TOKEN' in subprocess_env:
+                print(f"    GITHUB_TOKEN length in env: {len(subprocess_env['GITHUB_TOKEN'])}")
         
         result = subprocess.run(
             ['copilot', '-p', full_prompt, '--allow-all-tools', '--silent'],
@@ -191,6 +213,15 @@ def main():
         print("  - GH_TOKEN", file=sys.stderr)
         print("  - GITHUB_TOKEN", file=sys.stderr)
         sys.exit(1)
+    
+    if debug:
+        # Show which token source was used (masked for security)
+        token_source = 'COPILOT_GITHUB_TOKEN' if os.environ.get('COPILOT_GITHUB_TOKEN') else \
+                      'GH_TOKEN' if os.environ.get('GH_TOKEN') else \
+                      'GITHUB_TOKEN'
+        token_preview = f"{github_token[:8]}...{github_token[-4:]}" if len(github_token) > 12 else "***"
+        print(f"Using token from {token_source}: {token_preview}")
+        print(f"Token length: {len(github_token)} characters")
     
     # Use custom prompt if provided, otherwise use default
     prompt = custom_prompt if custom_prompt else default_prompt
