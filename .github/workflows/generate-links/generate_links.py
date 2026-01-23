@@ -427,9 +427,21 @@ def main():
     content_folder = os.environ.get('CONTENT_FOLDER', 'content/blog')
     custom_prompt = os.environ.get('CUSTOM_PROMPT', '')
     default_prompt = os.environ.get('DEFAULT_PROMPT', '')
+    hugo_list_file = os.environ.get('HUGO_LIST_FILE', '')
     hugo_list_csv = os.environ.get('HUGO_LIST_CSV', '')
     debug = os.environ.get('DEBUG', 'false').lower() == 'true'
     dry_run = os.environ.get('DRY_RUN', 'false').lower() == 'true'
+    
+    # Read Hugo list from file if provided (avoids "Argument list too long" error)
+    if hugo_list_file:
+        try:
+            with open(hugo_list_file, 'r', encoding='utf-8') as f:
+                hugo_list_csv = f.read()
+            if debug:
+                print(f"Read Hugo list from file: {hugo_list_file} ({len(hugo_list_csv)} characters)")
+        except Exception as e:
+            print(f"⚠️  Warning: Could not read Hugo list file {hugo_list_file}: {e}", file=sys.stderr)
+            print("   Falling back to HUGO_LIST_CSV environment variable if available", file=sys.stderr)
     
     if not github_token:
         print("Error: COPILOT_GITHUB_TOKEN environment variable is required", file=sys.stderr)

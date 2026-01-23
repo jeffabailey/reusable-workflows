@@ -285,18 +285,18 @@ jobs:
             exit 1
           fi
           
-          # Pass all CSV data to Python script for robust parsing
-          # Python will filter for draft=false and limit to 10 posts
-          cp /tmp/hugo_list_full.csv /tmp/hugo_list.csv
+          # Write CSV to a file accessible from the website working directory
+          # This avoids "Argument list too long" error when passing large CSV via env var
+          # Path is relative to ./website (next step's working directory)
+          HUGO_LIST_FILE=".github/workflows/generate-links/hugo_list.csv"
+          mkdir -p "$(dirname "../$HUGO_LIST_FILE")"
+          cp /tmp/hugo_list_full.csv "../$HUGO_LIST_FILE"
           
           echo "✅ Generated hugo list (total lines: $TOTAL_LINES)"
           echo "   Python script will filter for published posts (draft=false) and limit to 10"
-          # Output the list for the script to use
-          {
-            echo 'hugo_list<<EOF'
-            cat /tmp/hugo_list.csv
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
+          echo "   CSV written to: $HUGO_LIST_FILE (relative to website directory)"
+          # Output the file path for the script to use (relative to website working directory)
+          echo "hugo_list_file=$HUGO_LIST_FILE" >> "$GITHUB_OUTPUT"
 
       - name: Generate markdown links
         working-directory: ./website
@@ -307,7 +307,7 @@ jobs:
           CONTENT_FOLDER: ${{ inputs.content_folder }}
           CUSTOM_PROMPT: ${{ inputs.custom_prompt }}
           DEFAULT_PROMPT: ${{ steps.read-prompt.outputs.prompt }}
-          HUGO_LIST_CSV: ${{ steps.hugo-list.outputs.hugo_list }}
+          HUGO_LIST_FILE: ${{ steps.hugo-list.outputs.hugo_list_file }}
           DEBUG: ${{ inputs.debug }}
         run: |
           python3 .github/workflows/generate-links/generate_links.py
