@@ -83,23 +83,32 @@ Please provide the updated markdown with internal links added. Return only the u
         
         # Use a wrapper script approach to ensure environment variables are set
         # Write a temporary script that exports vars and runs copilot
+        # Don't pass env to subprocess.run - let the script's exports take effect
         with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False) as f:
             f.write(f"""#!/bin/bash
+set -e
 export GITHUB_TOKEN={shlex.quote(clean_token)}
 export GH_TOKEN={shlex.quote(clean_token)}
 export COPILOT_GITHUB_TOKEN={shlex.quote(clean_token)}
+# Debug: verify exports are set
+if [ "${{DEBUG:-false}}" = "true" ]; then
+    echo "Script environment variables:"
+    echo "  GITHUB_TOKEN length: ${{#GITHUB_TOKEN}}"
+    echo "  GH_TOKEN length: ${{#GH_TOKEN}}"
+    echo "  COPILOT_GITHUB_TOKEN length: ${{#COPILOT_GITHUB_TOKEN}}"
+fi
 exec copilot -p {shlex.quote(full_prompt)} --allow-all-tools --silent
 """)
             script_path = f.name
         
         try:
             os.chmod(script_path, 0o755)
+            # Don't pass env parameter - let the script's exports work
             result = subprocess.run(
                 ['/bin/bash', script_path],
                 capture_output=True,
                 text=True,
-                timeout=300,
-                env=subprocess_env
+                timeout=300
             )
         finally:
             # Clean up temp file
