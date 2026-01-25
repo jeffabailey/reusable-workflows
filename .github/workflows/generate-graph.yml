@@ -82,8 +82,15 @@ jobs:
             aws s3 cp graph.gexf s3://${{ secrets.aws_s3_bucket }}/graph.gexf \
               --acl public-read \
               --cache-control max-age=3600,public
+            aws s3 cp graph.csv s3://${{ secrets.aws_s3_bucket }}/graph.csv \
+              --acl public-read \
+              --cache-control max-age=3600,public
           else
             aws s3 cp graph.gexf s3://${{ secrets.aws_s3_bucket }}/graph.gexf \
+              --acl public-read \
+              --cache-control max-age=3600,public \
+              --only-show-errors
+            aws s3 cp graph.csv s3://${{ secrets.aws_s3_bucket }}/graph.csv \
               --acl public-read \
               --cache-control max-age=3600,public \
               --only-show-errors
@@ -95,17 +102,18 @@ jobs:
             echo "🐛 Debug mode enabled - running CloudFront invalidation with verbose output"
             aws cloudfront create-invalidation \
               --distribution-id ${{ secrets.aws_cloudfront_distribution_id }} \
-              --paths "/graph.gexf" \
+              --paths "/graph.gexf" "/graph.csv" \
               --debug
           else
             aws cloudfront create-invalidation \
               --distribution-id ${{ secrets.aws_cloudfront_distribution_id }} \
-              --paths "/graph.gexf"
+              --paths "/graph.gexf" "/graph.csv"
           fi
 
       - name: Summary
         run: |
           echo "✅ Graph generation complete"
-          echo "   Graph file: graph.gexf"
+          echo "   Graph files: graph.gexf, graph.csv"
           echo "   S3 location: s3://${{ secrets.aws_s3_bucket }}/graph.gexf"
-          echo "   CloudFront path: /graph.gexf"
+          echo "   S3 location: s3://${{ secrets.aws_s3_bucket }}/graph.csv"
+          echo "   CloudFront paths: /graph.gexf, /graph.csv"
