@@ -7,14 +7,6 @@ on:
         required: true
         type: string
         description: "Starting URL to crawl and generate graph from"
-      s3_bucket_name:
-        required: true
-        type: string
-        description: "S3 bucket name for deployment"
-      cloudfront_distribution_id:
-        required: true
-        type: string
-        description: "CloudFront distribution ID for cache invalidation"
       max_pages:
         required: false
         type: number
@@ -33,6 +25,10 @@ on:
       aws_access_key_id:
         required: true
       aws_secret_access_key:
+        required: true
+      aws_s3_bucket:
+        required: true
+      aws_cloudfront_distribution_id:
         required: true
 
 jobs:
@@ -76,11 +72,11 @@ jobs:
         run: |
           if [ "${{ inputs.debug }}" = "true" ]; then
             echo "🐛 Debug mode enabled - running S3 sync with verbose output"
-            aws s3 cp graph.gexf s3://${{ inputs.s3_bucket_name }}/graph.gexf \
+            aws s3 cp graph.gexf s3://${{ secrets.aws_s3_bucket }}/graph.gexf \
               --acl public-read \
               --cache-control max-age=3600,public
           else
-            aws s3 cp graph.gexf s3://${{ inputs.s3_bucket_name }}/graph.gexf \
+            aws s3 cp graph.gexf s3://${{ secrets.aws_s3_bucket }}/graph.gexf \
               --acl public-read \
               --cache-control max-age=3600,public \
               --only-show-errors
@@ -91,12 +87,12 @@ jobs:
           if [ "${{ inputs.debug }}" = "true" ]; then
             echo "🐛 Debug mode enabled - running CloudFront invalidation with verbose output"
             aws cloudfront create-invalidation \
-              --distribution-id ${{ inputs.cloudfront_distribution_id }} \
+              --distribution-id ${{ secrets.aws_cloudfront_distribution_id }} \
               --paths "/graph.gexf" \
               --debug
           else
             aws cloudfront create-invalidation \
-              --distribution-id ${{ inputs.cloudfront_distribution_id }} \
+              --distribution-id ${{ secrets.aws_cloudfront_distribution_id }} \
               --paths "/graph.gexf"
           fi
 
@@ -104,5 +100,5 @@ jobs:
         run: |
           echo "✅ Graph generation complete"
           echo "   Graph file: graph.gexf"
-          echo "   S3 location: s3://${{ inputs.s3_bucket_name }}/graph.gexf"
+          echo "   S3 location: s3://${{ secrets.aws_s3_bucket }}/graph.gexf"
           echo "   CloudFront path: /graph.gexf"
