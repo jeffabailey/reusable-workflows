@@ -16,10 +16,11 @@ import argparse
 import urllib.parse
 from urllib.robotparser import RobotFileParser
 from collections import deque
-from typing import Set, Dict, Optional, Union
+from typing import Set, Dict, Optional, Union, List
 import time
 import csv
 import warnings
+import fnmatch
 
 # Suppress urllib3 OpenSSL/LibreSSL compatibility warning
 # This is a known issue when urllib3 v2 is used with LibreSSL instead of OpenSSL
@@ -52,7 +53,8 @@ class WebsiteGraphCrawler:
         respect_robots: bool = True,
         delay: float = 0.5,
         timeout: int = 10,
-        debug: bool = False
+        debug: bool = False,
+        ignore_paths: Optional[List[str]] = None
     ):
         self.start_url = start_url
         self.parsed_start = urllib.parse.urlparse(start_url)
@@ -63,6 +65,10 @@ class WebsiteGraphCrawler:
         self.delay = delay
         self.timeout = timeout
         self.debug = debug
+        self.ignore_paths = ignore_paths or []
+        
+        if self.debug and self.ignore_paths:
+            print(f"🚫 Ignore paths configured: {self.ignore_paths}")
         
         self.graph = nx.DiGraph()
         self.visited: Set[str] = set()
@@ -105,6 +111,63 @@ class WebsiteGraphCrawler:
         except Exception:
             return True
     
+    def _should_ignore_url(self, url: str) -> bool:
+        """Check if URL should be ignored based on ignore_paths patterns."""
+        if not self.ignore_paths:
+            return False
+        
+        try:
+            parsed = urllib.parse.urlparse(url)
+            path = parsed.path
+            
+            # Ensure path starts with / for consistent matching
+            if not path.startswith('/'):
+                path = '/' + path
+            
+            # Normalize path for comparison (remove trailing slash except root)
+            # This allows matching /categories with /categories/
+            path_normalized = path.rstrip('/') if path != '/' else path
+            
+            # Check each ignore pattern
+            for pattern in self.ignore_paths:
+                pattern = pattern.strip()
+                if not pattern:
+                    continue
+                
+                # Ensure pattern starts with / for consistent matching
+                if not pattern.startswith('/'):
+                    pattern = '/' + pattern
+                
+                # Handle patterns ending with * (prefix match)
+                if pattern.endswith('*'):
+                    # Remove the * and normalize
+                    prefix = pattern.rstrip('*').rstrip('/')
+                    # Match if normalized path equals prefix or starts with prefix/
+                    # This matches /categories, /categories/, /categories/anything
+                    if path_normalized == prefix or path_normalized.startswith(prefix + '/'):
+                        if self.debug:
+                            print(f"🚫 Ignoring URL (matches pattern '{pattern}'): {url}")
+                        return True
+                
+                # Use fnmatch for wildcard matching (handles other wildcard patterns)
+                pattern_normalized = pattern.rstrip('/') if pattern != '/' else pattern
+                if fnmatch.fnmatch(path, pattern) or fnmatch.fnmatch(path_normalized, pattern):
+                    if self.debug:
+                        print(f"🚫 Ignoring URL (matches pattern '{pattern}'): {url}")
+                    return True
+                
+                # Check exact match (normalized)
+                if path_normalized == pattern_normalized or path == pattern:
+                    if self.debug:
+                        print(f"🚫 Ignoring URL (matches pattern '{pattern}'): {url}")
+                    return True
+            
+            return False
+        except Exception as e:
+            if self.debug:
+                print(f"⚠️  Error checking ignore pattern: {e}")
+            return False
+    
     def _normalize_url(self, url: str, base_url: str) -> Optional[str]:
         """Normalize and validate URL."""
         try:
@@ -123,6 +186,10 @@ class WebsiteGraphCrawler:
             
             # Only include URLs from the same domain
             if parsed.netloc != self.parsed_start.netloc:
+                return None
+            
+            # Check if URL should be ignored
+            if self._should_ignore_url(normalized):
                 return None
             
             # Remove trailing slash for consistency (except root)
@@ -159,7 +226,10 @@ class WebsiteGraphCrawler:
             # Find all <a> tags with href attributes
             for tag in soup.find_all('a', href=True):
                 # Skip links that are inside a footer with class "post-footer"
-                if tag.find_parent('footer', class_='post-footer'):
+                footer_parent = tag.find_parent('footer')
+                if footer_parent and 'post-footer' in footer_parent.get('class', []):
+                    if self.debug:
+                        print(f"🚫 Skipping link in post-footer: {tag.get('href', '')}")
                     continue
                 
                 href = tag['href']
@@ -361,6 +431,7 @@ Environment Variables:
   RESPECT_ROBOTS - Respect robots.txt (default: true)
   CRAWL_DELAY    - Delay between requests in seconds (default: 0.5)
   DEBUG          - Enable debug output (default: false)
+  IGNORE_PATHS   - URL paths to ignore, one per line (supports wildcards, default: empty)
         """
     )
     
@@ -411,6 +482,13 @@ Environment Variables:
         action='store_true',
         help='Enable debug output (or use DEBUG=true env var)'
     )
+    parser.add_argument(
+        '--ignore-paths',
+        dest='ignore_paths',
+        type=str,
+        default=None,
+        help='URL paths to ignore, one per line (supports wildcards, or use IGNORE_PATHS env var)'
+    )
     
     args = parser.parse_args()
     
@@ -426,6 +504,16 @@ Environment Variables:
     )
     delay = args.delay if args.delay is not None else float(os.environ.get('CRAWL_DELAY', '0.5'))
     debug = args.debug if args.debug else (os.environ.get('DEBUG', 'false').lower() == 'true')
+    
+    # Parse ignore paths from argument or environment variable
+    ignore_paths_str = args.ignore_paths or os.environ.get('IGNORE_PATHS', '')
+    if ignore_paths_str:
+        # Handle both literal \n sequences (from shell environment variables) and actual newlines
+        # Replace literal \n with actual newlines, then split
+        ignore_paths_str = ignore_paths_str.replace('\\n', '\n')
+        ignore_paths = [line.strip() for line in ignore_paths_str.split('\n') if line.strip()]
+    else:
+        ignore_paths = []
     
     if not website_url:
         print("Error: WEBSITE_URL is required", file=sys.stderr)
@@ -448,7 +536,8 @@ Environment Variables:
         max_depth=max_depth,
         respect_robots=respect_robots,
         delay=delay,
-        debug=debug
+        debug=debug,
+        ignore_paths=ignore_paths
     )
     
     crawler.crawl()

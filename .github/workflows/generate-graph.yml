@@ -21,6 +21,11 @@ on:
         required: false
         type: boolean
         default: false
+      ignore_paths:
+        required: false
+        type: string
+        default: "/archives*\n/archives\n/categories*"
+        description: "Ignore URL paths (one per line, supports wildcards)"
     secrets:
       aws_access_key_id:
         required: true
@@ -72,6 +77,7 @@ jobs:
           MAX_PAGES: ${{ inputs.max_pages }}
           MAX_DEPTH: ${{ inputs.max_depth }}
           DEBUG: ${{ inputs.debug }}
+          IGNORE_PATHS: ${{ inputs.ignore_paths }}
         run: |
           python3 reusable-workflows/.github/workflows/generate-graph/index.py
 
