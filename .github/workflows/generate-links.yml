@@ -372,18 +372,3 @@ jobs:
           else
             echo "ℹ️ No changes were made to markdown files"
           fi
-
-  deploy:
-    name: "Deploy Website"
-    needs: generateLinks
-    if: needs.generateLinks.outputs.changes == 'true' && inputs.auto_deploy == true
-    uses: jeffabailey/reusable-workflows/.github/workflows/hugo-deploy.yml@master
-    with:
-      website_repository: ${{ inputs.website_repository }}
-      s3_bucket_name: ${{ inputs.s3_bucket_name }}
-      cloudfront_distribution_id: ${{ inputs.cloudfront_distribution_id }}
-      debug: ${{ inputs.debug }}
-    secrets:
-      aws_access_key_id: ${{ secrets.aws_access_key_id }}
-      aws_secret_access_key: ${{ secrets.aws_secret_access_key }}
-      access_token: ${{ secrets.access_token }}

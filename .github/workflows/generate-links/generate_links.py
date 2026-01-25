@@ -22,9 +22,43 @@ import subprocess
 import csv
 import io
 import re
+import argparse
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 from difflib import unified_diff
+
+
+def extract_prompt_from_hugo_content(content: str) -> str:
+    """
+    Extract prompt text from Hugo content format.
+    
+    Hugo prompt files have front matter and use {{% prompt-text %}} shortcode.
+    This function extracts just the prompt content between the shortcode tags.
+    
+    Args:
+        content: Full file content including front matter and shortcode
+        
+    Returns:
+        Extracted prompt text, or original content if no shortcode found
+    """
+    # Try to find content between {{% prompt-text %}} and {{% /prompt-text %}}
+    pattern = r'\{\{%\s*prompt-text[^%]*%\}\}(.*?)\{\{%\s*/prompt-text\s*%\}\}'
+    match = re.search(pattern, content, re.DOTALL)
+    
+    if match:
+        return match.group(1).strip()
+    
+    # If no shortcode found, try to strip front matter (content between --- markers)
+    # and return the rest
+    frontmatter_pattern = r'^---\s*\n.*?\n---\s*\n'
+    content_without_frontmatter = re.sub(frontmatter_pattern, '', content, flags=re.DOTALL)
+    
+    # If content was significantly reduced, return the stripped version
+    if len(content_without_frontmatter) < len(content) * 0.5:
+        return content_without_frontmatter.strip()
+    
+    # Otherwise, return original content (might be plain markdown)
+    return content.strip()
 
 
 def parse_hugo_csv(hugo_list_csv: str, debug: bool = False) -> Dict[str, Dict]:
@@ -260,25 +294,36 @@ I need you to process {len(files_content)} markdown files and add internal links
 1. Process ALL {len(files_content)} files listed above
 2. For each file, add appropriate internal links to related published content
 3. ONLY link to posts that are in the published posts list provided earlier (draft=false)
-4. Return the updated content for EACH file using this exact format:
+4. **CRITICAL: Return the COMPLETE file content for each file**, including:
+   - The full front matter (YAML header between --- markers) if present
+   - All original content
+   - Only add new internal links - do NOT remove or modify existing content
+   - Do NOT change the structure, formatting, or existing links
+5. Return the updated content for EACH file using this exact format:
 
 ===FILE_START:{{file_path}}===
-[updated markdown content for this file]
+[COMPLETE updated markdown content for this file, including all front matter and original content]
 ===FILE_END:{{file_path}}===
 
 For example, if processing file "blog/post/index.md", return:
 
 ===FILE_START:blog/post/index.md===
-[updated content here]
+---
+title: "Original Title"
+date: 2026-01-01
+---
+[original content with new internal links added]
 ===FILE_END:blog/post/index.md===
 
 **IMPORTANT**: 
 - Process ALL files, not just one
 - Use the exact file paths shown in the file list above
 - Include the ===FILE_START: and ===FILE_END: markers for each file
+- Return the COMPLETE file content, not just the changes
+- Preserve all front matter, formatting, and existing content
 - Only add links to published posts (draft=false from the Hugo list)
 
-Please process all {len(files_content)} files and return the updated content with internal links added."""
+Please process all {len(files_content)} files and return the complete updated content with internal links added."""
     
     # Try using GitHub Copilot CLI
     try:
@@ -444,40 +489,160 @@ def parse_copilot_response(response: str, file_paths: List[Path]) -> Dict[Path, 
                         updates[file_path] = content.strip()
                         break
     
-    # Strategy 3: If only one file, assume entire response is for that file
+    # Strategy 3: If only one file, check if response looks like complete file content
     if not updates and len(file_paths) == 1:
-        updates[file_paths[0]] = response.strip()
+        # Only use this strategy if response looks like it contains front matter or is substantial
+        response_stripped = response.strip()
+        if response_stripped.startswith('---') or len(response_stripped) > 500:
+            updates[file_paths[0]] = response_stripped
+        else:
+            print("⚠️  Warning: Response for single file doesn't look like complete content", file=sys.stderr)
+            print(f"   Response length: {len(response_stripped)} chars", file=sys.stderr)
+            print("   Skipping update to avoid overwriting with incomplete content", file=sys.stderr)
     
     # Strategy 4: If multiple files but no structure, try to split by common delimiters
+    # This is risky, so we'll be more conservative
     if not updates and len(file_paths) > 1:
         # Try splitting by triple backticks or horizontal rules
         sections = re.split(r'```|---|\*\*\*', response)
         if len(sections) >= len(file_paths):
             for i, file_path in enumerate(file_paths):
                 if i < len(sections):
-                    updates[file_path] = sections[i].strip()
+                    section_content = sections[i].strip()
+                    # Only use if it looks substantial (likely contains actual content)
+                    if len(section_content) > 200:
+                        updates[file_path] = section_content
     
     if not updates:
         print("⚠️  Warning: Could not parse structured response from Copilot", file=sys.stderr)
-        print("   Response may not contain file markers. Attempting to use entire response...", file=sys.stderr)
-        # Last resort: assign entire response to first file (not ideal but better than failing)
-        if file_paths:
-            updates[file_paths[0]] = response.strip()
+        print("   Response may not contain file markers or may be incomplete.", file=sys.stderr)
+        print("   NOT updating files to avoid overwriting with incorrect content.", file=sys.stderr)
+        print("   Please check the Copilot response format and try again.", file=sys.stderr)
+        # Don't assign to first file as last resort - this is too risky
     
     return updates
 
 
 def main():
     """Main entry point for the script."""
-    # Get environment variables
-    github_token = os.environ.get('COPILOT_GITHUB_TOKEN')
-    content_folder = os.environ.get('CONTENT_FOLDER', 'content/blog')
-    custom_prompt = os.environ.get('CUSTOM_PROMPT', '')
+    parser = argparse.ArgumentParser(
+        description='Generate markdown links using GitHub Copilot Chat API.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Using environment variables (GitHub Actions workflow style)
+  export COPILOT_GITHUB_TOKEN='your-token'
+  export CONTENT_FOLDER='content/blog'
+  export DEFAULT_PROMPT='$(cat content/prompts/internal-link-optimize.md)'
+  python3 generate_links.py
+
+  # Using command-line arguments
+  python3 generate_links.py \\
+    --token 'your-token' \\
+    --content-folder 'content/blog' \\
+    --prompt-file 'content/prompts/internal-link-optimize.md' \\
+    --hugo-list-file 'hugo_list.csv'
+
+  # Dry run (preview changes without modifying files)
+  python3 generate_links.py --dry-run
+
+Environment Variables:
+  The script supports both command-line arguments and environment variables.
+  Command-line arguments take precedence over environment variables.
+
+  COPILOT_GITHUB_TOKEN    - GitHub token with Copilot API access (required)
+  CONTENT_FOLDER          - Path to content folder (default: content/blog)
+  CUSTOM_PROMPT           - Custom prompt text (overrides prompt file)
+  DEFAULT_PROMPT          - Default prompt text (from prompt file)
+                            If not set, script will try to read from
+                            content/prompts/internal-link-optimize.md
+  HUGO_LIST_FILE          - Path to Hugo list CSV file
+                            If not provided, script will automatically
+                            run 'hugo list all' to generate it
+  HUGO_LIST_CSV           - Hugo list CSV content (alternative to file)
+  DEBUG                   - Enable debug output (true/false)
+  DRY_RUN                 - Preview changes without modifying files (true/false)
+        """
+    )
+    
+    parser.add_argument(
+        '--token',
+        dest='github_token',
+        help='GitHub Copilot token (or use COPILOT_GITHUB_TOKEN env var)'
+    )
+    parser.add_argument(
+        '--content-folder',
+        dest='content_folder',
+        help='Path to content folder (default: content/blog or CONTENT_FOLDER env var)'
+    )
+    parser.add_argument(
+        '--prompt-file',
+        dest='prompt_file',
+        help='Path to prompt file (reads content and sets as DEFAULT_PROMPT). Default: content/prompts/internal-link-optimize.md'
+    )
+    parser.add_argument(
+        '--custom-prompt',
+        dest='custom_prompt',
+        help='Custom prompt text (overrides prompt file, or use CUSTOM_PROMPT env var)'
+    )
+    parser.add_argument(
+        '--hugo-list-file',
+        dest='hugo_list_file',
+        help='Path to Hugo list CSV file (or use HUGO_LIST_FILE env var). If not provided, script will automatically run "hugo list all"'
+    )
+    parser.add_argument(
+        '--hugo-list-csv',
+        dest='hugo_list_csv',
+        help='Hugo list CSV content as string (or use HUGO_LIST_CSV env var)'
+    )
+    parser.add_argument(
+        '--debug',
+        action='store_true',
+        help='Enable debug output (or use DEBUG=true env var)'
+    )
+    parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Preview changes without modifying files (or use DRY_RUN=true env var)'
+    )
+    
+    args = parser.parse_args()
+    
+    # Get values from command-line arguments or environment variables
+    # Command-line arguments take precedence
+    github_token = args.github_token or os.environ.get('COPILOT_GITHUB_TOKEN')
+    content_folder = args.content_folder or os.environ.get('CONTENT_FOLDER', 'content/blog')
+    custom_prompt = args.custom_prompt or os.environ.get('CUSTOM_PROMPT', '')
     default_prompt = os.environ.get('DEFAULT_PROMPT', '')
-    hugo_list_file = os.environ.get('HUGO_LIST_FILE', '')
-    hugo_list_csv = os.environ.get('HUGO_LIST_CSV', '')
-    debug = os.environ.get('DEBUG', 'false').lower() == 'true'
-    dry_run = os.environ.get('DRY_RUN', 'false').lower() == 'true'
+    hugo_list_file = args.hugo_list_file or os.environ.get('HUGO_LIST_FILE', '')
+    hugo_list_csv = args.hugo_list_csv or os.environ.get('HUGO_LIST_CSV', '')
+    debug = args.debug or os.environ.get('DEBUG', 'false').lower() == 'true'
+    dry_run = args.dry_run or os.environ.get('DRY_RUN', 'false').lower() == 'true'
+    
+    # If prompt file is provided via command line, read it
+    if args.prompt_file:
+        try:
+            with open(args.prompt_file, 'r', encoding='utf-8') as f:
+                file_content = f.read()
+            default_prompt = extract_prompt_from_hugo_content(file_content)
+            if debug:
+                print(f"Read prompt from file: {args.prompt_file} ({len(default_prompt)} characters)")
+        except Exception as e:
+            print(f"Error: Could not read prompt file {args.prompt_file}: {e}", file=sys.stderr)
+            sys.exit(1)
+    elif not default_prompt and not custom_prompt:
+        # Try default prompt file location if no prompt is provided
+        default_prompt_file = 'content/prompts/internal-link-optimize.md'
+        if os.path.exists(default_prompt_file):
+            try:
+                with open(default_prompt_file, 'r', encoding='utf-8') as f:
+                    file_content = f.read()
+                default_prompt = extract_prompt_from_hugo_content(file_content)
+                if debug:
+                    print(f"Read prompt from default file: {default_prompt_file} ({len(default_prompt)} characters)")
+            except Exception as e:
+                if debug:
+                    print(f"Warning: Could not read default prompt file {default_prompt_file}: {e}", file=sys.stderr)
     
     # Read Hugo list from file if provided (avoids "Argument list too long" error)
     if hugo_list_file:
@@ -490,6 +655,72 @@ def main():
             print(f"⚠️  Warning: Could not read Hugo list file {hugo_list_file}: {e}", file=sys.stderr)
             print("   Falling back to HUGO_LIST_CSV environment variable if available", file=sys.stderr)
     
+    # If no Hugo list provided, try to generate it automatically
+    if not hugo_list_csv or not hugo_list_csv.strip():
+        if debug:
+            print("No Hugo list provided, attempting to generate it automatically...")
+        
+        # Try to find Hugo directory (look for config.toml or hugo.toml)
+        hugo_dir = None
+        current_dir = Path(os.getcwd())
+        
+        # Check current directory first
+        if (current_dir / 'config.toml').exists() or (current_dir / 'hugo.toml').exists():
+            hugo_dir = current_dir
+        # Check parent directory (in case run from hugo/ subdirectory)
+        elif (current_dir.parent / 'config.toml').exists() or (current_dir.parent / 'hugo.toml').exists():
+            hugo_dir = current_dir.parent
+        # Check if content_folder path gives us a clue
+        elif content_folder:
+            content_path = Path(content_folder)
+            if content_path.exists():
+                # Walk up to find Hugo root
+                for parent in content_path.parents:
+                    if (parent / 'config.toml').exists() or (parent / 'hugo.toml').exists():
+                        hugo_dir = parent
+                        break
+        
+        # Default to current directory if we can't find Hugo root
+        if hugo_dir is None:
+            hugo_dir = current_dir
+            if debug:
+                print(f"⚠️  Could not find Hugo root (config.toml or hugo.toml), using current directory: {hugo_dir}")
+        else:
+            if debug:
+                print(f"Found Hugo root directory: {hugo_dir}")
+        
+        # Check if hugo command is available
+        try:
+            result = subprocess.run(
+                ['hugo', 'list', 'all'],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=str(hugo_dir)  # Run from Hugo directory
+            )
+            
+            if result.returncode == 0 and result.stdout.strip():
+                hugo_list_csv = result.stdout
+                total_lines = len(hugo_list_csv.splitlines())
+                if debug:
+                    print(f"✅ Generated Hugo list automatically ({total_lines} lines)")
+                elif total_lines > 1:
+                    print(f"✅ Generated Hugo list automatically ({total_lines} lines)")
+            else:
+                if debug:
+                    print(f"⚠️  Hugo list command returned non-zero exit code: {result.returncode}", file=sys.stderr)
+                    if result.stderr:
+                        print(f"   Error: {result.stderr}", file=sys.stderr)
+        except FileNotFoundError:
+            if debug:
+                print("⚠️  Hugo command not found - cannot generate Hugo list automatically", file=sys.stderr)
+        except subprocess.TimeoutExpired:
+            if debug:
+                print("⚠️  Hugo list command timed out", file=sys.stderr)
+        except Exception as e:
+            if debug:
+                print(f"⚠️  Could not generate Hugo list automatically: {e}", file=sys.stderr)
+    
     if not github_token:
         print("Error: COPILOT_GITHUB_TOKEN environment variable is required", file=sys.stderr)
         print("  Please set the COPILOT_GITHUB_TOKEN secret in the workflow", file=sys.stderr)
@@ -500,8 +731,13 @@ def main():
         print(f"Using token from COPILOT_GITHUB_TOKEN: {token_preview}")
         print(f"Token length: {len(github_token)} characters")
     
-    # Use custom prompt if provided, otherwise use default
-    prompt = custom_prompt if custom_prompt else default_prompt
+    # Extract prompt text from Hugo format if needed (for both custom and default)
+    if custom_prompt:
+        prompt = extract_prompt_from_hugo_content(custom_prompt)
+    elif default_prompt:
+        prompt = extract_prompt_from_hugo_content(default_prompt)
+    else:
+        prompt = ''
     
     if not prompt or prompt.strip() == "" or prompt == "No prompt file found":
         print("Error: No prompt provided (neither CUSTOM_PROMPT nor DEFAULT_PROMPT)", file=sys.stderr)
@@ -636,6 +872,64 @@ Only link to posts that are relevant and add value to the content.
         updated_content = updates[file_path]
         original_content = files_content.get(file_path, '')
         
+        # Validation: Check if updated content looks valid
+        # 1. Check if it contains the original front matter (Hugo files start with ---)
+        original_has_frontmatter = original_content.strip().startswith('---')
+        updated_has_frontmatter = updated_content.strip().startswith('---')
+        
+        if original_has_frontmatter and not updated_has_frontmatter:
+            print(f"❌ {file_path} - Updated content missing front matter (YAML header)", file=sys.stderr)
+            print("   Skipping update - this indicates a parsing error", file=sys.stderr)
+            if debug:
+                print(f"   Original starts with: {original_content[:100]}...", file=sys.stderr)
+                print(f"   Updated starts with: {updated_content[:100]}...", file=sys.stderr)
+            continue
+        
+        # 1b. If both have front matter, verify the front matter matches (title should be same)
+        if original_has_frontmatter and updated_has_frontmatter:
+            # Extract front matter from both
+            original_frontmatter_match = re.match(r'^---\s*\n(.*?)\n---', original_content, re.DOTALL)
+            updated_frontmatter_match = re.match(r'^---\s*\n(.*?)\n---', updated_content, re.DOTALL)
+            
+            if original_frontmatter_match and updated_frontmatter_match:
+                original_frontmatter = original_frontmatter_match.group(1)
+                updated_frontmatter = updated_frontmatter_match.group(1)
+                
+                # Extract title from both
+                original_title_match = re.search(r'^title:\s*["\']?([^"\'\n]+)', original_frontmatter, re.MULTILINE)
+                updated_title_match = re.search(r'^title:\s*["\']?([^"\'\n]+)', updated_frontmatter, re.MULTILINE)
+                
+                if original_title_match and updated_title_match:
+                    original_title = original_title_match.group(1).strip()
+                    updated_title = updated_title_match.group(1).strip()
+                    
+                    if original_title != updated_title:
+                        print(f"❌ {file_path} - Front matter title changed (parsing error?)", file=sys.stderr)
+                        print(f"   Original title: {original_title}", file=sys.stderr)
+                        print(f"   Updated title: {updated_title}", file=sys.stderr)
+                        print("   Skipping update - front matter should not change", file=sys.stderr)
+                        continue
+        
+        # 2. Check if updated content is suspiciously short (likely parsing error)
+        if len(updated_content) < len(original_content) * 0.5:
+            print(f"⚠️  {file_path} - Updated content is significantly shorter than original", file=sys.stderr)
+            print(f"   Original: {len(original_content)} chars, Updated: {len(updated_content)} chars", file=sys.stderr)
+            print("   This may indicate a parsing error. Skipping update.", file=sys.stderr)
+            if debug:
+                print(f"   Original preview: {original_content[:200]}...", file=sys.stderr)
+                print(f"   Updated preview: {updated_content[:200]}...", file=sys.stderr)
+            continue
+        
+        # 3. Check if updated content is suspiciously long (likely includes extra content)
+        if len(updated_content) > len(original_content) * 2:
+            print(f"⚠️  {file_path} - Updated content is significantly longer than original", file=sys.stderr)
+            print(f"   Original: {len(original_content)} chars, Updated: {len(updated_content)} chars", file=sys.stderr)
+            print("   This may indicate a parsing error. Skipping update.", file=sys.stderr)
+            if debug:
+                print(f"   Original preview: {original_content[:200]}...", file=sys.stderr)
+                print(f"   Updated preview: {updated_content[:200]}...", file=sys.stderr)
+            continue
+        
         if updated_content != original_content:
             # Extract links that were added
             links_added = extract_links_from_diff(original_content, updated_content)
@@ -664,6 +958,7 @@ Only link to posts that are relevant and add value to the content.
             else:
                 if debug:
                     print(f"ℹ️  {file_path} - Content updated but no new links detected")
+                    print("   Skipping write to avoid overwriting with potentially incorrect content")
         else:
             if debug:
                 print(f"ℹ️  {file_path} - No changes needed")

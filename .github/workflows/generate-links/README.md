@@ -2,6 +2,42 @@
 
 This workflow uses GitHub Copilot CLI to automatically generate and add internal links to markdown files in your repository.
 
+## Local Usage
+
+You can run the link generation script locally from any Hugo website directory:
+
+```bash
+# From your Hugo site directory
+cd /path/to/your/hugo/site
+
+# Run the script (adjust path as needed)
+~/Projects/canzan/reusable-workflows/.github/workflows/generate-links/generate-links.sh
+```
+
+Or set it as an alias in your shell:
+
+```bash
+alias generate-links='~/Projects/canzan/reusable-workflows/.github/workflows/generate-links/generate-links.sh'
+```
+
+The script will:
+1. Check prerequisites (Hugo, Python, Copilot CLI)
+2. Read your prompt file (default: `content/prompts/internal-link-optimize.md`)
+3. Generate Hugo list of published posts
+4. Run the Python script to generate links
+
+### Environment Variables
+
+You can customize the script behavior with environment variables:
+
+- `CONTENT_FOLDER`: Path to content folder (default: `content/blog`)
+- `PROMPT_FILE`: Path to prompt file (default: `content/prompts/internal-link-optimize.md`)
+- `CUSTOM_PROMPT`: Custom prompt text (overrides prompt file)
+- `COPILOT_GITHUB_TOKEN`: GitHub token with Copilot API access (required)
+- `DEBUG`: Enable debug output (`true`/`false`)
+- `DRY_RUN`: Preview changes without modifying files (`true`/`false`)
+- `REUSABLE_WORKFLOWS_DIR`: Path to reusable-workflows directory (if not in default location)
+
 ## Prerequisites
 
 Before using this workflow, ensure you have:
