@@ -68,7 +68,7 @@ jobs:
       - name: Generate graph
         env:
           WEBSITE_URL: ${{ inputs.website_url }}
-          OUTPUT_FILE: graph.gexf
+          OUTPUT_FILE: graph.csv
           MAX_PAGES: ${{ inputs.max_pages }}
           MAX_DEPTH: ${{ inputs.max_depth }}
           DEBUG: ${{ inputs.debug }}
@@ -79,17 +79,10 @@ jobs:
         run: |
           if [ "${{ inputs.debug }}" = "true" ]; then
             echo "🐛 Debug mode enabled - running S3 sync with verbose output"
-            aws s3 cp graph.gexf s3://${{ secrets.aws_s3_bucket }}/graph.gexf \
-              --acl public-read \
-              --cache-control max-age=3600,public
             aws s3 cp graph.csv s3://${{ secrets.aws_s3_bucket }}/graph.csv \
               --acl public-read \
               --cache-control max-age=3600,public
           else
-            aws s3 cp graph.gexf s3://${{ secrets.aws_s3_bucket }}/graph.gexf \
-              --acl public-read \
-              --cache-control max-age=3600,public \
-              --only-show-errors
             aws s3 cp graph.csv s3://${{ secrets.aws_s3_bucket }}/graph.csv \
               --acl public-read \
               --cache-control max-age=3600,public \
@@ -102,18 +95,17 @@ jobs:
             echo "🐛 Debug mode enabled - running CloudFront invalidation with verbose output"
             aws cloudfront create-invalidation \
               --distribution-id ${{ secrets.aws_cloudfront_distribution_id }} \
-              --paths "/graph.gexf" "/graph.csv" \
+              --paths "/graph.csv" \
               --debug
           else
             aws cloudfront create-invalidation \
               --distribution-id ${{ secrets.aws_cloudfront_distribution_id }} \
-              --paths "/graph.gexf" "/graph.csv"
+              --paths "/graph.csv"
           fi
 
       - name: Summary
         run: |
           echo "✅ Graph generation complete"
-          echo "   Graph files: graph.gexf, graph.csv"
-          echo "   S3 location: s3://${{ secrets.aws_s3_bucket }}/graph.gexf"
+          echo "   Graph file: graph.csv"
           echo "   S3 location: s3://${{ secrets.aws_s3_bucket }}/graph.csv"
-          echo "   CloudFront paths: /graph.gexf, /graph.csv"
+          echo "   CloudFront path: /graph.csv"

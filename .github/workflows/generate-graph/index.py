@@ -158,6 +158,10 @@ class WebsiteGraphCrawler:
             
             # Find all <a> tags with href attributes
             for tag in soup.find_all('a', href=True):
+                # Skip links that are inside a footer with class "post-footer"
+                if tag.find_parent('footer', class_='post-footer'):
+                    continue
+                
                 href = tag['href']
                 normalized = self._normalize_url(href, base_url)
                 
