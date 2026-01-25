@@ -44,9 +44,16 @@ jobs:
           aws-secret-access-key: ${{ secrets.aws_secret_access_key }}
           aws-region: us-east-1
 
-      - name: Checkout
+      - name: Checkout calling repository
         uses: actions/checkout@v4
         with:
+          fetch-depth: 1
+
+      - name: Checkout reusable-workflows repository
+        uses: actions/checkout@v4
+        with:
+          repository: jeffabailey/reusable-workflows
+          path: reusable-workflows
           fetch-depth: 1
 
       - name: Setup Python
@@ -66,7 +73,7 @@ jobs:
           MAX_DEPTH: ${{ inputs.max_depth }}
           DEBUG: ${{ inputs.debug }}
         run: |
-          python3 .github/workflows/generate-graph/index.py
+          python3 reusable-workflows/.github/workflows/generate-graph/index.py
 
       - name: S3 Sync
         run: |
