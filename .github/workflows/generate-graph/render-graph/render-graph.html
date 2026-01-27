@@ -95,6 +95,57 @@
             background: #5a6268;
         }
 
+        .search-container {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            position: relative;
+        }
+
+        .search-container input[type="text"] {
+            padding: 0.5rem 2.5rem 0.5rem 0.75rem;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            width: 250px;
+        }
+
+        .search-container input[type="text"]:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+        }
+
+        .search-clear {
+            position: absolute;
+            right: 0.5rem;
+            background: none;
+            border: none;
+            color: #666;
+            cursor: pointer;
+            font-size: 1.2rem;
+            padding: 0;
+            width: 20px;
+            height: 20px;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .search-clear.visible {
+            display: flex;
+        }
+
+        .search-clear:hover {
+            color: #333;
+        }
+
+        .search-results {
+            font-size: 0.85rem;
+            color: #666;
+            white-space: nowrap;
+        }
+
         .graph-container {
             flex: 1;
             background: white;
@@ -139,6 +190,11 @@
             <button onclick="loadGraph()">Load Graph (from file)</button>
             <label for="fileInput" class="file-input-label">Choose Graph JSON File</label>
             <input type="file" id="fileInput" accept=".json" onchange="loadGraphFromFile(event)">
+            <div class="search-container">
+                <input type="text" id="searchInput" placeholder="Search nodes..." oninput="performSearch()" onkeydown="handleSearchKeydown(event)">
+                <button class="search-clear" id="searchClear" onclick="clearSearch()" title="Clear search">×</button>
+                <span class="search-results" id="searchResults"></span>
+            </div>
             <label for="layout">Layout:</label>
             <select id="layout" onchange="changeLayout()">
                 <option value="dagre">Dagre (Hierarchical)</option>
@@ -213,6 +269,20 @@
                             'background-color': '#ffc107',
                             'border-color': '#ff9800',
                             'border-width': 3
+                        }
+                    },
+                    {
+                        selector: 'node.matched',
+                        style: {
+                            'background-color': '#17a2b8',
+                            'border-color': '#138496',
+                            'border-width': 3
+                        }
+                    },
+                    {
+                        selector: 'node.hidden',
+                        style: {
+                            'opacity': 0.2
                         }
                     }
                 ],
@@ -366,6 +436,126 @@
         // Update status message
         function updateStatus(message) {
             document.getElementById('status').textContent = message;
+        }
+
+        // Search functionality
+        let searchMatches = [];
+        let currentMatchIndex = -1;
+
+        function performSearch() {
+            const searchTerm = document.getElementById('searchInput').value.trim().toLowerCase();
+            const searchClear = document.getElementById('searchClear');
+            const searchResults = document.getElementById('searchResults');
+
+            if (!cy || cy.elements().length === 0) {
+                return;
+            }
+
+            // Clear previous search
+            cy.elements().removeClass('matched hidden');
+            searchMatches = [];
+            currentMatchIndex = -1;
+
+            if (searchTerm === '') {
+                searchClear.classList.remove('visible');
+                searchResults.textContent = '';
+                return;
+            }
+
+            searchClear.classList.add('visible');
+
+            // Find matching nodes
+            cy.nodes().forEach(node => {
+                const label = (node.data('label') || '').toLowerCase();
+                const url = (node.data('url') || '').toLowerCase();
+                const title = (node.data('title') || '').toLowerCase();
+                const id = (node.data('id') || '').toLowerCase();
+
+                if (label.includes(searchTerm) || 
+                    url.includes(searchTerm) || 
+                    title.includes(searchTerm) ||
+                    id.includes(searchTerm)) {
+                    searchMatches.push(node);
+                    node.addClass('matched');
+                } else {
+                    node.addClass('hidden');
+                }
+            });
+
+            // Update search results display
+            if (searchMatches.length > 0) {
+                searchResults.textContent = `${searchMatches.length} match${searchMatches.length !== 1 ? 'es' : ''}`;
+                // Highlight first match
+                if (searchMatches.length > 0) {
+                    currentMatchIndex = 0;
+                    highlightMatch(0);
+                }
+            } else {
+                searchResults.textContent = 'No matches';
+            }
+        }
+
+        function highlightMatch(index) {
+            if (searchMatches.length === 0) return;
+
+            // Remove previous selection
+            cy.elements().removeClass('highlighted');
+
+            // Highlight current match
+            const node = searchMatches[index];
+            node.addClass('highlighted');
+            node.style('background-color', '#ffc107');
+            node.style('border-color', '#ff9800');
+            node.style('border-width', 4);
+
+            // Center view on matched node
+            cy.animate({
+                center: { eles: node },
+                zoom: Math.min(cy.zoom() * 1.5, 2)
+            }, {
+                duration: 300
+            });
+
+            // Update status
+            updateStatus(`Match ${index + 1} of ${searchMatches.length}: ${node.data('label')}`);
+        }
+
+        function handleSearchKeydown(event) {
+            if (searchMatches.length === 0) return;
+
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                if (event.shiftKey) {
+                    // Previous match
+                    currentMatchIndex = (currentMatchIndex - 1 + searchMatches.length) % searchMatches.length;
+                } else {
+                    // Next match
+                    currentMatchIndex = (currentMatchIndex + 1) % searchMatches.length;
+                }
+                highlightMatch(currentMatchIndex);
+            } else if (event.key === 'Escape') {
+                clearSearch();
+            }
+        }
+
+        function clearSearch() {
+            document.getElementById('searchInput').value = '';
+            document.getElementById('searchClear').classList.remove('visible');
+            document.getElementById('searchResults').textContent = '';
+
+            if (cy) {
+                cy.elements().removeClass('matched hidden highlighted');
+                // Reset node styles
+                cy.nodes().forEach(node => {
+                    node.style('background-color', '');
+                    node.style('border-color', '');
+                    node.style('border-width', '');
+                });
+            }
+
+            searchMatches = [];
+            currentMatchIndex = -1;
+            updateStatus('Search cleared');
         }
 
         // Initialize on page load
