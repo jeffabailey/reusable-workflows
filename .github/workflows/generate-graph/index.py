@@ -19,6 +19,7 @@ from collections import deque
 from typing import Set, Dict, Optional, Union, List
 import time
 import csv
+import json
 import warnings
 import fnmatch
 
@@ -67,9 +68,6 @@ class WebsiteGraphCrawler:
         self.debug = debug
         self.ignore_paths = ignore_paths or []
         
-        if self.debug and self.ignore_paths:
-            print(f"🚫 Ignore paths configured: {self.ignore_paths}")
-        
         self.graph = nx.DiGraph()
         self.visited: Set[str] = set()
         self.queue = deque()
@@ -116,6 +114,13 @@ class WebsiteGraphCrawler:
         if not self.ignore_paths:
             return False
         
+        # Debug: Print ignore_paths if debug is enabled
+        if self.debug and len(self.ignore_paths) > 0:
+            # Only print once to avoid spam
+            if not hasattr(self, '_ignore_paths_printed'):
+                print(f"🔍 Checking ignore patterns: {self.ignore_paths}")
+                self._ignore_paths_printed = True
+        
         try:
             parsed = urllib.parse.urlparse(url)
             path = parsed.path
@@ -130,6 +135,7 @@ class WebsiteGraphCrawler:
             
             # Check each ignore pattern
             for pattern in self.ignore_paths:
+                pattern_original = pattern
                 pattern = pattern.strip()
                 if not pattern:
                     continue
@@ -146,7 +152,7 @@ class WebsiteGraphCrawler:
                     # This matches /categories, /categories/, /categories/anything
                     if path_normalized == prefix or path_normalized.startswith(prefix + '/'):
                         if self.debug:
-                            print(f"🚫 Ignoring URL (matches pattern '{pattern}'): {url}")
+                            print(f"🚫 Ignoring URL (matches pattern '{pattern_original}'): {url}")
                         return True
                 
                 # Use fnmatch for wildcard matching (handles other wildcard patterns)
@@ -274,10 +280,17 @@ class WebsiteGraphCrawler:
     
     def crawl(self):
         """Crawl the website and build the graph."""
-        if self.debug:
-            print(f"🌐 Starting crawl from: {self.start_url}")
-            max_pages_str = str(self.max_pages) if self.max_pages is not None else "unlimited"
-            print(f"   Max pages: {max_pages_str}, Max depth: {self.max_depth}")
+        print(f"🌐 Starting crawl from: {self.start_url}")
+        max_pages_str = str(self.max_pages) if self.max_pages is not None else "unlimited"
+        print(f"   Max pages: {max_pages_str}, Max depth: {self.max_depth}")
+        
+        # Always report ignore paths if configured
+        if self.ignore_paths:
+            print(f"🚫 Ignore paths configured ({len(self.ignore_paths)} pattern(s)):")
+            for pattern in self.ignore_paths:
+                print(f"   - {pattern}")
+        else:
+            print("🚫 No ignore paths configured")
         
         # Start with the initial URL
         self.queue.append((self.start_url, 0))
@@ -289,6 +302,14 @@ class WebsiteGraphCrawler:
                 continue
             
             if url in self.visited:
+                continue
+            
+            # Check if URL should be ignored before processing
+            if self._should_ignore_url(url):
+                if self.debug:
+                    print(f"🚫 Skipping ignored URL: {url}")
+                # Still mark as visited to avoid reprocessing
+                self.visited.add(url)
                 continue
             
             self.visited.add(url)
@@ -317,6 +338,12 @@ class WebsiteGraphCrawler:
             
             # Add edges and queue new URLs
             for link in links:
+                # Double-check that link is not ignored (should already be filtered by _normalize_url, but be safe)
+                if self._should_ignore_url(link):
+                    if self.debug:
+                        print(f"🚫 Skipping ignored link: {link}")
+                    continue
+                
                 target_id = self._get_node_id(link)
                 # Ensure target node exists (it might not have been visited yet)
                 # Use URL as label for unvisited nodes (title will be set when visited)
@@ -335,84 +362,228 @@ class WebsiteGraphCrawler:
             print(f"\n✅ Crawl complete: {len(self.visited)} pages, {self.graph.number_of_edges()} links")
     
     def save_csv(self, base_path: str):
-        """Save graph as a single CSV file with both nodes and edges.
+        """Save graph as separate node and edge CSV files for Cytoscape.
         
-        CSV includes all required fields:
-        - Type: 'Node' or 'Edge'
-        - Id: Node ID (for nodes only)
-        - Label: Node label (for nodes only)
-        - URL: Node URL (for nodes only)
-        - Depth: Crawl depth (for nodes only)
-        - Source: Source node URL (for edges only)
-        - Target: Target node URL (for edges only)
-        - EdgeType: Edge type, e.g., 'Directed' (for edges only)
+        Creates two files:
+        - nodes.csv: id, label, url, depth
+        - edges.csv: source, target, interaction
+        
+        Cytoscape expects:
+        - Edge file with source/target columns (required)
+        - Optional node file with node attributes
+        - IDs must match exactly between files
         """
         try:
             # Generate base filename without extension
             base_name = os.path.splitext(base_path)[0]
-            csv_path = f"{base_name}.csv"
+            nodes_path = f"{base_name}_nodes.csv"
+            edges_path = f"{base_name}_edges.csv"
             
             # Ensure all nodes have required attributes before exporting
             for node_id in self.graph.nodes():
                 node_data = self.graph.nodes[node_id]
-                if 'label' not in node_data:
-                    node_data['label'] = node_data.get('url', str(node_id))
-                if 'url' not in node_data:
-                    node_data['url'] = node_data.get('label', str(node_id))
+                # Get URL first, with proper fallback
+                url = node_data.get('url')
+                if not url:  # Handle None, empty string, etc.
+                    # Try to get URL from the reverse mapping (node_id -> URL)
+                    url = next((u for u, nid in self.url_to_id.items() if nid == node_id), None)
+                    if not url:
+                        url = node_data.get('label', str(node_id))
+                node_data['url'] = url
+                
+                if 'label' not in node_data or not node_data['label']:
+                    node_data['label'] = url
                 if 'depth' not in node_data:
                     node_data['depth'] = 0
             
-            # Create a single CSV file with both nodes and edges
-            # Group edges immediately after their source nodes for better readability
-            with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+            # Write nodes CSV file
+            with open(nodes_path, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
-                # Write header with all required columns
-                writer.writerow(['Type', 'Id', 'Label', 'URL', 'Depth', 'Source', 'Target', 'EdgeType'])
+                # Write header: id, label, url, depth
+                writer.writerow(['id', 'label', 'url', 'depth'])
                 
-                # Build a map of source node to its outgoing edges
-                edges_by_source = {}
-                for source_id, target_id in self.graph.edges():
-                    if source_id not in edges_by_source:
-                        edges_by_source[source_id] = []
-                    edges_by_source[source_id].append(target_id)
-                
-                # Write each node followed immediately by its outgoing edges
+                # Write each node
                 for node_id in self.graph.nodes():
                     node_data = self.graph.nodes[node_id]
-                    url = node_data.get('url', str(node_id))
+                    # Get URL, ensuring it's never None or empty
+                    url = node_data.get('url')
+                    if not url:  # Handle None, empty string, etc.
+                        # Try to get URL from the reverse mapping (node_id -> URL)
+                        url = next((u for u, nid in self.url_to_id.items() if nid == node_id), None)
+                        if not url:
+                            url = node_data.get('label', str(node_id))
+                    # Ensure URL is a string
+                    url = str(url) if url else str(node_id)
+                    
                     label = node_data.get('label', url)
                     depth = node_data.get('depth', 0)
-                    # For nodes: Type='Node', Id/Label/URL/Depth filled, Source/Target/EdgeType empty
-                    # Use page title (label) as Id instead of numeric ID
-                    writer.writerow(['Node', label, label, url, depth, '', '', ''])
+                    # Use URL as id (unique identifier for Cytoscape)
+                    writer.writerow([url, label, url, depth])
+            
+            # Write edges CSV file
+            with open(edges_path, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                # Write header: source, target, interaction
+                writer.writerow(['source', 'target', 'interaction'])
+                
+                # Write each edge
+                for source_id, target_id in self.graph.edges():
+                    source_node_data = self.graph.nodes[source_id]
+                    target_node_data = self.graph.nodes[target_id]
                     
-                    # Write all edges originating from this node immediately after the node
-                    if node_id in edges_by_source:
-                        for target_id in edges_by_source[node_id]:
-                            target_node_data = self.graph.nodes[target_id]
-                            target_url = target_node_data.get('url', str(target_id))
-                            target_label = target_node_data.get('label', target_url)
-                            # For edges: Type='Edge', Id/Label/Source/Target/EdgeType filled, URL/Depth empty
-                            # Use target page title as Id and in Label field
-                            writer.writerow(['Edge', target_label, target_label, '', '', url, target_url, 'Directed'])
+                    # Get source URL, ensuring it's never None or empty
+                    source_url = source_node_data.get('url')
+                    if not source_url:  # Handle None, empty string, etc.
+                        source_url = next((u for u, nid in self.url_to_id.items() if nid == source_id), None)
+                        if not source_url:
+                            source_url = source_node_data.get('label', str(source_id))
+                    source_url = str(source_url) if source_url else str(source_id)
+                    
+                    # Get target URL, ensuring it's never None or empty
+                    target_url = target_node_data.get('url')
+                    if not target_url:  # Handle None, empty string, etc.
+                        target_url = next((u for u, nid in self.url_to_id.items() if nid == target_id), None)
+                        if not target_url:
+                            target_url = target_node_data.get('label', str(target_id))
+                    target_url = str(target_url) if target_url else str(target_id)
+                    
+                    # Write edge: source URL, target URL, interaction type
+                    writer.writerow([source_url, target_url, 'Directed'])
             
             if self.debug:
-                print(f"💾 Saved CSV file: {csv_path}")
-                print(f"   Nodes: {self.graph.number_of_nodes()}")
-                print(f"   Edges: {self.graph.number_of_edges()}")
+                print(f"💾 Saved CSV files:")
+                print(f"   Nodes: {nodes_path} ({self.graph.number_of_nodes()} nodes)")
+                print(f"   Edges: {edges_path} ({self.graph.number_of_edges()} edges)")
+            else:
+                print(f"💾 Saved CSV files: {nodes_path}, {edges_path}")
         except Exception as e:
             print(f"❌ Error saving CSV file: {e}", file=sys.stderr)
+            sys.exit(1)
+    
+    def save_json(self, output_path: str):
+        """Save graph in Cytoscape.js JSON format.
+        
+        Format:
+        {
+          "elements": {
+            "nodes": [
+              {"data": {"id": "...", "label": "...", "url": "...", "depth": ...}}
+            ],
+            "edges": [
+              {"data": {"source": "...", "target": "...", "interaction": "Directed"}}
+            ]
+          }
+        }
+        """
+        try:
+            # Ensure all nodes have required attributes before exporting
+            for node_id in self.graph.nodes():
+                node_data = self.graph.nodes[node_id]
+                # Get URL first, with proper fallback
+                url = node_data.get('url')
+                if not url:  # Handle None, empty string, etc.
+                    # Try to get URL from the reverse mapping (node_id -> URL)
+                    url = next((u for u, nid in self.url_to_id.items() if nid == node_id), None)
+                    if not url:
+                        url = node_data.get('label', str(node_id))
+                node_data['url'] = url
+                
+                if 'label' not in node_data or not node_data['label']:
+                    node_data['label'] = url
+                if 'depth' not in node_data:
+                    node_data['depth'] = 0
+            
+            # Build nodes array
+            nodes_array = []
+            for node_id in self.graph.nodes():
+                node_data = self.graph.nodes[node_id]
+                # Get URL, ensuring it's never None or empty
+                url = node_data.get('url')
+                if not url:  # Handle None, empty string, etc.
+                    url = next((u for u, nid in self.url_to_id.items() if nid == node_id), None)
+                    if not url:
+                        url = node_data.get('label', str(node_id))
+                url = str(url) if url else str(node_id)
+                
+                label = node_data.get('label', url)
+                depth = node_data.get('depth', 0)
+                title = node_data.get('title')
+                
+                node_element = {
+                    "data": {
+                        "id": url,
+                        "label": label,
+                        "url": url,
+                        "depth": depth
+                    }
+                }
+                if title:
+                    node_element["data"]["title"] = title
+                
+                nodes_array.append(node_element)
+            
+            # Build edges array
+            edges_array = []
+            for source_id, target_id in self.graph.edges():
+                source_node_data = self.graph.nodes[source_id]
+                target_node_data = self.graph.nodes[target_id]
+                
+                # Get source URL, ensuring it's never None or empty
+                source_url = source_node_data.get('url')
+                if not source_url:  # Handle None, empty string, etc.
+                    source_url = next((u for u, nid in self.url_to_id.items() if nid == source_id), None)
+                    if not source_url:
+                        source_url = source_node_data.get('label', str(source_id))
+                source_url = str(source_url) if source_url else str(source_id)
+                
+                # Get target URL, ensuring it's never None or empty
+                target_url = target_node_data.get('url')
+                if not target_url:  # Handle None, empty string, etc.
+                    target_url = next((u for u, nid in self.url_to_id.items() if nid == target_id), None)
+                    if not target_url:
+                        target_url = target_node_data.get('label', str(target_id))
+                target_url = str(target_url) if target_url else str(target_id)
+                
+                edges_array.append({
+                    "data": {
+                        "source": source_url,
+                        "target": target_url,
+                        "interaction": "Directed"
+                    }
+                })
+            
+            # Build Cytoscape JSON structure
+            cytoscape_data = {
+                "elements": {
+                    "nodes": nodes_array,
+                    "edges": edges_array
+                }
+            }
+            
+            # Write JSON file
+            with open(output_path, 'w', encoding='utf-8') as f:
+                json.dump(cytoscape_data, f, indent=2, ensure_ascii=False)
+            
+            if self.debug:
+                print(f"💾 Saved Cytoscape JSON:")
+                print(f"   File: {output_path}")
+                print(f"   Nodes: {len(nodes_array)}, Edges: {len(edges_array)}")
+            else:
+                print(f"💾 Saved Cytoscape JSON: {output_path}")
+        
+        except Exception as e:
+            print(f"❌ Error saving JSON file: {e}", file=sys.stderr)
             sys.exit(1)
 
 
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description='Generate a link graph from a website URL in CSV format.',
+        description='Generate a link graph from a website URL in Cytoscape-compatible CSV format.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Basic usage
+  # Basic usage (creates graph_nodes.csv and graph_edges.csv)
   python3 index.py --url https://example.com --output graph.csv
 
   # With custom limits
@@ -423,9 +594,17 @@ Examples:
   export OUTPUT_FILE='graph.csv'
   python3 index.py
 
+Output Files:
+  The script creates CSV and JSON files for Cytoscape:
+  - <output>_nodes.csv: Node attributes (id, label, url, depth)
+  - <output>_edges.csv: Edge list (source, target, interaction)
+  - <output>.json: Cytoscape.js JSON format (compatible with both desktop and JS library)
+  
+  Import nodes first, then edges in Cytoscape desktop, or use JSON for Cytoscape.js.
+
 Environment Variables:
   WEBSITE_URL    - Starting URL to crawl (required)
-  OUTPUT_FILE    - Output CSV file path (default: graph.csv)
+  OUTPUT_FILE    - Base name for output CSV files (default: graph.csv)
   MAX_PAGES      - Maximum pages to crawl (default: unlimited, set to number to limit)
   MAX_DEPTH      - Maximum crawl depth (default: 5)
   RESPECT_ROBOTS - Respect robots.txt (default: true)
@@ -543,9 +722,20 @@ Environment Variables:
     crawler.crawl()
     crawler.save_csv(output_file)
     
-    print(f"✅ CSV file saved: {output_file}")
-    print(f"   Nodes: {crawler.graph.number_of_nodes()}")
-    print(f"   Edges: {crawler.graph.number_of_edges()}")
+    # Generate JSON file
+    base_name = os.path.splitext(output_file)[0]
+    json_file = f"{base_name}.json"
+    crawler.save_json(json_file)
+    
+    # Generate filenames for the output message
+    nodes_file = f"{base_name}_nodes.csv"
+    edges_file = f"{base_name}_edges.csv"
+    
+    print(f"✅ Files saved:")
+    print(f"   CSV Nodes: {nodes_file} ({crawler.graph.number_of_nodes()} nodes)")
+    print(f"   CSV Edges: {edges_file} ({crawler.graph.number_of_edges()} edges)")
+    print(f"   JSON: {json_file} (Cytoscape.js format)")
+    print(f"   Import nodes first, then edges in Cytoscape (or use JSON for Cytoscape.js)")
 
 
 if __name__ == '__main__':

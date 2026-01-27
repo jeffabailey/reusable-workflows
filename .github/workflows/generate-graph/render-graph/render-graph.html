@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Graph Visualization</title>
+    <script src="https://unpkg.com/htmx.org@2.0.3"></script>
+    <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
+    <script src="https://unpkg.com/cytoscape@3.27.0/dist/cytoscape.min.js"></script>
+    <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        .header {
+            background: white;
+            padding: 1rem 2rem;
+            border-bottom: 1px solid #e0e0e0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            color: #333;
+        }
+
+        .controls {
+            background: white;
+            padding: 1rem 2rem;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .controls button {
+            padding: 0.5rem 1rem;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: background 0.2s;
+        }
+
+        .controls button:hover {
+            background: #0056b3;
+        }
+
+        .controls select {
+            padding: 0.5rem;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+
+        .controls label {
+            font-size: 0.9rem;
+            color: #666;
+        }
+
+        .controls input[type="file"] {
+            display: none;
+        }
+
+        .file-input-label {
+            padding: 0.5rem 1rem;
+            background: #6c757d;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: background 0.2s;
+            display: inline-block;
+        }
+
+        .file-input-label:hover {
+            background: #5a6268;
+        }
+
+        .graph-container {
+            flex: 1;
+            background: white;
+            margin: 1rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        #cy {
+            width: 100%;
+            height: 100%;
+        }
+
+        .status {
+            padding: 0.5rem 2rem;
+            background: #f8f9fa;
+            border-top: 1px solid #e0e0e0;
+            font-size: 0.85rem;
+            color: #666;
+        }
+
+        .loading {
+            display: none;
+            padding: 1rem;
+            text-align: center;
+            color: #666;
+        }
+
+        .loading.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Graph Visualization</h1>
+        </div>
+        
+        <div class="controls">
+            <button onclick="loadGraph()">Load Graph (from file)</button>
+            <label for="fileInput" class="file-input-label">Choose Graph JSON File</label>
+            <input type="file" id="fileInput" accept=".json" onchange="loadGraphFromFile(event)">
+            <label for="layout">Layout:</label>
+            <select id="layout" onchange="changeLayout()">
+                <option value="dagre">Dagre (Hierarchical)</option>
+                <option value="breadthfirst">Breadthfirst</option>
+                <option value="cose">CoSE (Force-directed)</option>
+                <option value="grid">Grid</option>
+                <option value="circle">Circle</option>
+            </select>
+            <button onclick="resetZoom()">Reset Zoom</button>
+        </div>
+
+        <div class="loading" id="loading">Loading graph data...</div>
+
+        <div class="graph-container">
+            <div id="cy"></div>
+        </div>
+
+        <div class="status" id="status">Ready. Click "Load Graph" to visualize.</div>
+    </div>
+
+    <script>
+        let cy;
+        let graphData = null;
+
+        // Initialize Cytoscape
+        function initCytoscape() {
+            cy = cytoscape({
+                container: document.getElementById('cy'),
+                style: [
+                    {
+                        selector: 'node',
+                        style: {
+                            'background-color': '#007bff',
+                            'label': 'data(label)',
+                            'text-valign': 'center',
+                            'text-halign': 'center',
+                            'color': '#333',
+                            'font-size': '12px',
+                            'width': 'mapData(depth, 0, 5, 30, 60)',
+                            'height': 'mapData(depth, 0, 5, 30, 60)',
+                            'border-width': 2,
+                            'border-color': '#fff',
+                            'text-wrap': 'wrap',
+                            'text-max-width': '100px',
+                            'text-overflow-wrap': 'anywhere'
+                        }
+                    },
+                    {
+                        selector: 'node[depth = 0]',
+                        style: {
+                            'background-color': '#28a745',
+                            'width': 60,
+                            'height': 60,
+                            'font-size': '14px',
+                            'font-weight': 'bold'
+                        }
+                    },
+                    {
+                        selector: 'edge',
+                        style: {
+                            'width': 2,
+                            'line-color': '#ccc',
+                            'target-arrow-color': '#ccc',
+                            'target-arrow-shape': 'triangle',
+                            'curve-style': 'bezier',
+                            'opacity': 0.6
+                        }
+                    },
+                    {
+                        selector: 'node:selected',
+                        style: {
+                            'background-color': '#ffc107',
+                            'border-color': '#ff9800',
+                            'border-width': 3
+                        }
+                    }
+                ],
+                layout: {
+                    name: 'dagre',
+                    rankDir: 'TB',
+                    spacingFactor: 1.5
+                }
+            });
+
+            // Add event listeners
+            cy.on('tap', 'node', function(evt) {
+                const node = evt.target;
+                updateStatus(`Node: ${node.data('label')} | URL: ${node.data('url')} | Depth: ${node.data('depth')}`);
+            });
+
+            cy.on('tap', 'edge', function(evt) {
+                const edge = evt.target;
+                updateStatus(`Edge: ${edge.source().data('label')} → ${edge.target().data('label')}`);
+            });
+
+            cy.on('tap', function(evt) {
+                if (evt.target === cy) {
+                    updateStatus('Graph loaded. Click nodes or edges for details.');
+                }
+            });
+        }
+
+        // Load graph data - tries fetch first, falls back to file input
+        function loadGraph() {
+            const loading = document.getElementById('loading');
+            const status = document.getElementById('status');
+            
+            loading.classList.add('active');
+            status.textContent = 'Loading graph data...';
+
+            // Try to load from relative path (works when served via HTTP)
+            fetch('./graph.json')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    graphData = data;
+                    renderGraph(data);
+                    loading.classList.remove('active');
+                    updateStatus(`Graph loaded: ${data.elements.nodes.length} nodes, ${data.elements.edges.length} edges`);
+                })
+                .catch(error => {
+                    // If fetch fails (CORS or file not found), prompt for file input
+                    loading.classList.remove('active');
+                    if (error.message.includes('Failed to fetch') || error.message.includes('CORS')) {
+                        updateStatus('Cannot load file directly. Please use "Choose Graph JSON File" button to select graph.json');
+                        document.getElementById('fileInput').click();
+                    } else {
+                        updateStatus(`Error loading graph: ${error.message}`);
+                        console.error('Error loading graph:', error);
+                    }
+                });
+        }
+
+        // Load graph from file input (handles file:// protocol)
+        function loadGraphFromFile(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const loading = document.getElementById('loading');
+            const status = document.getElementById('status');
+            
+            loading.classList.add('active');
+            status.textContent = 'Loading graph data from file...';
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    graphData = data;
+                    renderGraph(data);
+                    loading.classList.remove('active');
+                    updateStatus(`Graph loaded: ${data.elements.nodes.length} nodes, ${data.elements.edges.length} edges`);
+                } catch (error) {
+                    loading.classList.remove('active');
+                    updateStatus(`Error parsing JSON: ${error.message}`);
+                    console.error('Error parsing JSON:', error);
+                }
+            };
+            reader.onerror = function() {
+                loading.classList.remove('active');
+                updateStatus('Error reading file');
+            };
+            reader.readAsText(file);
+        }
+
+        // Render the graph
+        function renderGraph(data) {
+            if (!cy) {
+                initCytoscape();
+            }
+
+            // Clear existing elements
+            cy.elements().remove();
+
+            // Add nodes and edges
+            if (data.elements && data.elements.nodes) {
+                cy.add(data.elements.nodes);
+            }
+            if (data.elements && data.elements.edges) {
+                cy.add(data.elements.edges);
+            }
+
+            // Apply layout
+            changeLayout();
+        }
+
+        // Change layout
+        function changeLayout() {
+            if (!cy || cy.elements().length === 0) return;
+
+            const layoutName = document.getElementById('layout').value;
+            const layoutOptions = {
+                name: layoutName,
+                animate: true,
+                animationDuration: 500,
+                animationEasing: 'ease-out'
+            };
+
+            // Add layout-specific options
+            if (layoutName === 'dagre') {
+                layoutOptions.rankDir = 'TB';
+                layoutOptions.spacingFactor = 1.5;
+            } else if (layoutName === 'breadthfirst') {
+                layoutOptions.directed = true;
+                layoutOptions.spacingFactor = 1.5;
+            } else if (layoutName === 'cose') {
+                layoutOptions.nodeRepulsion = 4500;
+                layoutOptions.idealEdgeLength = 100;
+            }
+
+            cy.layout(layoutOptions).run();
+        }
+
+        // Reset zoom
+        function resetZoom() {
+            if (cy) {
+                cy.fit();
+            }
+        }
+
+        // Update status message
+        function updateStatus(message) {
+            document.getElementById('status').textContent = message;
+        }
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            initCytoscape();
+        });
+    </script>
+</body>
+</html>

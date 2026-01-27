@@ -23,9 +23,11 @@ import csv
 import io
 import re
 import argparse
+import json
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Set
 from difflib import unified_diff
+from collections import defaultdict
 
 
 def extract_prompt_from_hugo_content(content: str) -> str:
@@ -255,6 +257,221 @@ def extract_links_from_diff(original: str, updated: str) -> List[str]:
         links_added.append(f"  - {{{{< relref \"{path}\" >}}}}")
     
     return links_added
+
+
+def extract_all_links_from_content(content: str) -> List[Tuple[str, str, str]]:
+    """
+    Extract all links from markdown content.
+    
+    Returns a list of tuples: (link_text, link_url, link_type)
+    where link_type is 'markdown', 'hugo_shortcode', or 'standalone_relref'
+    """
+    links = []
+    
+    # Find markdown links: [text](url)
+    markdown_link_pattern = r'\[([^\]]+)\]\(([^\)]+)\)'
+    for text, url in re.findall(markdown_link_pattern, content):
+        links.append((text.strip(), url.strip(), 'markdown'))
+    
+    # Find Hugo shortcode links: [text]({{< relref "path" >}})
+    hugo_shortcode_pattern = r'\[([^\]]+)\]\(\{\{<\s*relref\s+["\']([^"\']+)["\']\s*>\}\}\)'
+    for text, path in re.findall(hugo_shortcode_pattern, content):
+        links.append((text.strip(), path.strip(), 'hugo_shortcode'))
+    
+    # Find standalone relref shortcodes
+    standalone_relref_pattern = r'\{\{<\s*relref\s+["\']([^"\']+)["\']\s*>\}\}'
+    for path in re.findall(standalone_relref_pattern, content):
+        links.append(('', path.strip(), 'standalone_relref'))
+    
+    return links
+
+
+def build_link_graph(
+    files_content: Dict[Path, str],
+    published_posts: Dict[str, Dict],
+    content_folder: str,
+    debug: bool = False
+) -> Tuple[Dict[str, Dict], List[Tuple[str, str]]]:
+    """
+    Build a graph of links from markdown files.
+    
+    Returns:
+        - nodes: Dictionary mapping node_id to node data (label, url, type)
+        - edges: List of tuples (source_id, target_id)
+    """
+    nodes = {}
+    edges = []
+    content_path = Path(content_folder)
+    
+    # Helper to get node ID from file path or URL
+    def get_node_id(identifier: str, node_type: str = 'file') -> str:
+        """Get or create a node ID."""
+        if identifier not in nodes:
+            nodes[identifier] = {
+                'id': identifier,
+                'label': identifier,
+                'url': identifier,
+                'type': node_type
+            }
+        return identifier
+    
+    # Process each file
+    for file_path, content in files_content.items():
+        try:
+            # Get relative path for node ID
+            rel_path = str(file_path.relative_to(content_path)) if file_path.is_relative_to(content_path) else str(file_path)
+            source_id = get_node_id(rel_path, 'file')
+            
+            # Update node with file information
+            nodes[source_id]['label'] = file_path.stem
+            nodes[source_id]['file_path'] = str(file_path)
+            
+            # Extract all links from content
+            links = extract_all_links_from_content(content)
+            
+            for link_text, link_url, link_type in links:
+                # Normalize target URL/path
+                target_id = link_url
+                
+                # For Hugo relref, try to resolve to actual file path
+                if link_type in ('hugo_shortcode', 'standalone_relref'):
+                    # Try to match against published posts
+                    normalized_path = link_url.replace('\\', '/')
+                    if normalized_path in published_posts:
+                        post_data = published_posts[normalized_path]
+                        target_id = post_data.get('permalink', normalized_path)
+                        # Update node with post information
+                        if target_id not in nodes:
+                            nodes[target_id] = {
+                                'id': target_id,
+                                'label': post_data.get('title', normalized_path),
+                                'url': post_data.get('permalink', normalized_path),
+                                'type': 'post'
+                            }
+                        else:
+                            nodes[target_id]['label'] = post_data.get('title', nodes[target_id]['label'])
+                            nodes[target_id]['url'] = post_data.get('permalink', target_id)
+                            nodes[target_id]['type'] = 'post'
+                    else:
+                        # Use path as-is
+                        target_id = get_node_id(normalized_path, 'link')
+                        nodes[target_id]['label'] = link_text if link_text else normalized_path
+                
+                # For markdown links, use URL as-is
+                elif link_type == 'markdown':
+                    target_id = get_node_id(link_url, 'link')
+                    nodes[target_id]['label'] = link_text if link_text else link_url
+                
+                # Add edge
+                edges.append((source_id, target_id))
+        
+        except Exception as e:
+            if debug:
+                print(f"⚠️  Error processing {file_path} for graph: {e}", file=sys.stderr)
+            continue
+    
+    return nodes, edges
+
+
+def save_csv_files(nodes: Dict[str, Dict], edges: List[Tuple[str, str]], base_path: str):
+    """
+    Save graph as separate node and edge CSV files for Cytoscape.
+    
+    Creates two files:
+    - nodes.csv: id, label, url, type
+    - edges.csv: source, target, interaction
+    """
+    try:
+        base_name = os.path.splitext(base_path)[0]
+        nodes_path = f"{base_name}_nodes.csv"
+        edges_path = f"{base_name}_edges.csv"
+        
+        # Write nodes CSV file
+        with open(nodes_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['id', 'label', 'url', 'type'])
+            
+            for node_id, node_data in sorted(nodes.items()):
+                writer.writerow([
+                    node_data.get('id', node_id),
+                    node_data.get('label', node_id),
+                    node_data.get('url', node_id),
+                    node_data.get('type', 'unknown')
+                ])
+        
+        # Write edges CSV file
+        with open(edges_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['source', 'target', 'interaction'])
+            
+            for source_id, target_id in edges:
+                writer.writerow([source_id, target_id, 'Directed'])
+        
+        print(f"💾 Saved CSV files:")
+        print(f"   Nodes: {nodes_path} ({len(nodes)} nodes)")
+        print(f"   Edges: {edges_path} ({len(edges)} edges)")
+        
+    except Exception as e:
+        print(f"❌ Error saving CSV files: {e}", file=sys.stderr)
+
+
+def save_cytoscape_json(nodes: Dict[str, Dict], edges: List[Tuple[str, str]], output_path: str):
+    """
+    Save graph in Cytoscape.js JSON format.
+    
+    Format:
+    {
+      "elements": {
+        "nodes": [
+          {"data": {"id": "...", "label": "...", "url": "...", "type": "..."}}
+        ],
+        "edges": [
+          {"data": {"source": "...", "target": "...", "interaction": "Directed"}}
+        ]
+      }
+    }
+    """
+    try:
+        # Build nodes array
+        nodes_array = []
+        for node_id, node_data in sorted(nodes.items()):
+            nodes_array.append({
+                "data": {
+                    "id": node_data.get('id', node_id),
+                    "label": node_data.get('label', node_id),
+                    "url": node_data.get('url', node_id),
+                    "type": node_data.get('type', 'unknown')
+                }
+            })
+        
+        # Build edges array
+        edges_array = []
+        for source_id, target_id in edges:
+            edges_array.append({
+                "data": {
+                    "source": source_id,
+                    "target": target_id,
+                    "interaction": "Directed"
+                }
+            })
+        
+        # Build Cytoscape JSON structure
+        cytoscape_data = {
+            "elements": {
+                "nodes": nodes_array,
+                "edges": edges_array
+            }
+        }
+        
+        # Write JSON file
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(cytoscape_data, f, indent=2, ensure_ascii=False)
+        
+        print(f"💾 Saved Cytoscape JSON: {output_path}")
+        print(f"   Nodes: {len(nodes_array)}, Edges: {len(edges_array)}")
+        
+    except Exception as e:
+        print(f"❌ Error saving Cytoscape JSON: {e}", file=sys.stderr)
 
 
 def get_github_copilot_response_batch(
@@ -965,6 +1182,70 @@ Only link to posts that are relevant and add value to the content.
     
     print("="*80)
     print(f"\n{'Would update' if dry_run else 'Updated'} {changes_made} file(s) with new internal links")
+    
+    # Build link graph and export to CSV and JSON
+    if changes_made > 0 or len(updates) > 0:
+        print("\n" + "="*80)
+        print("GENERATING LINK GRAPH")
+        print("="*80 + "\n")
+        
+        # Use updated content for graph building
+        graph_files_content = {}
+        for file_path in files_content.keys():
+            if file_path in updates:
+                graph_files_content[file_path] = updates[file_path]
+            else:
+                graph_files_content[file_path] = files_content[file_path]
+        
+        # Build graph from all links in processed files
+        try:
+            nodes, edges = build_link_graph(
+                graph_files_content,
+                published_posts,
+                content_folder,
+                debug=debug
+            )
+            
+            if nodes and edges:
+                # Determine output directory
+                # Try to use the same directory as the script, or current working directory
+                try:
+                    script_dir = Path(__file__).parent
+                except NameError:
+                    script_dir = Path.cwd()
+                
+                output_dir = script_dir
+                
+                # Allow override via environment variable
+                output_dir_env = os.environ.get('OUTPUT_DIR', '')
+                if output_dir_env:
+                    output_dir = Path(output_dir_env)
+                
+                output_dir.mkdir(parents=True, exist_ok=True)
+                
+                base_csv_path = str(output_dir / 'links_graph.csv')
+                json_path = str(output_dir / 'links_graph.json')
+                
+                # Save CSV files
+                if not dry_run:
+                    save_csv_files(nodes, edges, base_csv_path)
+                    
+                    # Save Cytoscape JSON
+                    save_cytoscape_json(nodes, edges, json_path)
+                    
+                    print(f"\n✅ Graph files saved to: {output_dir}")
+                else:
+                    print(f"📊 Would generate graph files:")
+                    print(f"   CSV: {base_csv_path}_nodes.csv, {base_csv_path}_edges.csv")
+                    print(f"   JSON: {json_path}")
+            else:
+                print("⚠️  No links found to build graph", file=sys.stderr)
+        
+        except Exception as e:
+            print(f"⚠️  Warning: Could not generate graph files: {e}", file=sys.stderr)
+            if debug:
+                import traceback
+                traceback.print_exc()
     
     if changes_made == 0:
         print("No changes were made to any files")
