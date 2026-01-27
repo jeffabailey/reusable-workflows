@@ -89,6 +89,12 @@ jobs:
         run: |
           if [ "${{ inputs.debug }}" = "true" ]; then
             echo "🐛 Debug mode enabled - running S3 sync with verbose output"
+            aws s3 cp graph_nodes.csv s3://${{ secrets.aws_s3_bucket }}/graph_nodes.csv \
+              --acl public-read \
+              --cache-control max-age=3600,public
+            aws s3 cp graph_edges.csv s3://${{ secrets.aws_s3_bucket }}/graph_edges.csv \
+              --acl public-read \
+              --cache-control max-age=3600,public
             aws s3 cp graph.json s3://${{ secrets.aws_s3_bucket }}/graph.json \
               --acl public-read \
               --cache-control max-age=3600,public
@@ -96,6 +102,14 @@ jobs:
               --acl public-read \
               --cache-control max-age=3600,public
           else
+            aws s3 cp graph_nodes.csv s3://${{ secrets.aws_s3_bucket }}/graph_nodes.csv \
+              --acl public-read \
+              --cache-control max-age=3600,public \
+              --only-show-errors
+            aws s3 cp graph_edges.csv s3://${{ secrets.aws_s3_bucket }}/graph_edges.csv \
+              --acl public-read \
+              --cache-control max-age=3600,public \
+              --only-show-errors
             aws s3 cp graph.json s3://${{ secrets.aws_s3_bucket }}/graph.json \
               --acl public-read \
               --cache-control max-age=3600,public \
@@ -112,17 +126,17 @@ jobs:
             echo "🐛 Debug mode enabled - running CloudFront invalidation with verbose output"
             aws cloudfront create-invalidation \
               --distribution-id ${{ secrets.aws_cloudfront_distribution_id }} \
-              --paths "/graph.json" "/render-graph.html" \
+              --paths "/graph_nodes.csv" "/graph_edges.csv" "/graph.json" "/render-graph.html" \
               --debug
           else
             aws cloudfront create-invalidation \
               --distribution-id ${{ secrets.aws_cloudfront_distribution_id }} \
-              --paths "/graph.json" "/render-graph.html"
+              --paths "/graph_nodes.csv" "/graph_edges.csv" "/graph.json" "/render-graph.html"
           fi
 
       - name: Summary
         run: |
           echo "✅ Graph generation complete"
-          echo "   Graph files: graph.json, render-graph.html"
+          echo "   Graph files: graph_nodes.csv, graph_edges.csv, graph.json, render-graph.html"
           echo "   S3 location: s3://${{ secrets.aws_s3_bucket }}/"
-          echo "   CloudFront paths: /graph.json, /render-graph.html"
+          echo "   CloudFront paths: /graph_nodes.csv, /graph_edges.csv, /graph.json, /render-graph.html"
