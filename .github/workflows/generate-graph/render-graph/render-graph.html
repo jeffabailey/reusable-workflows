@@ -75,26 +75,6 @@
             color: #666;
         }
 
-        .controls input[type="file"] {
-            display: none;
-        }
-
-        .file-input-label {
-            padding: 0.5rem 1rem;
-            background: #6c757d;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.9rem;
-            transition: background 0.2s;
-            display: inline-block;
-        }
-
-        .file-input-label:hover {
-            background: #5a6268;
-        }
-
         .search-container {
             display: flex;
             align-items: center;
@@ -187,9 +167,7 @@
         </div>
         
         <div class="controls">
-            <button onclick="loadGraph()">Load Graph (from file)</button>
-            <label for="fileInput" class="file-input-label">Choose Graph JSON File</label>
-            <input type="file" id="fileInput" accept=".json" onchange="loadGraphFromFile(event)">
+            <button onclick="loadGraph()">Reload Graph</button>
             <div class="search-container">
                 <input type="text" id="searchInput" placeholder="Search nodes..." oninput="performSearch()" onkeydown="handleSearchKeydown(event)">
                 <button class="search-clear" id="searchClear" onclick="clearSearch()" title="Clear search">×</button>
@@ -204,6 +182,7 @@
                 <option value="circle">Circle</option>
             </select>
             <button onclick="resetZoom()">Reset Zoom</button>
+            <button onclick="showAllNodes()">Show All</button>
         </div>
 
         <div class="loading" id="loading">Loading graph data...</div>
@@ -212,7 +191,7 @@
             <div id="cy"></div>
         </div>
 
-        <div class="status" id="status">Ready. Click "Load Graph" to visualize.</div>
+        <div class="status" id="status">Loading graph...</div>
     </div>
 
     <script>
@@ -284,6 +263,36 @@
                         style: {
                             'opacity': 0.2
                         }
+                    },
+                    {
+                        selector: 'node.neighborhood',
+                        style: {
+                            'background-color': '#17a2b8',
+                            'border-color': '#138496',
+                            'border-width': 3,
+                            'opacity': 1
+                        }
+                    },
+                    {
+                        selector: 'edge.neighborhood',
+                        style: {
+                            'line-color': '#17a2b8',
+                            'target-arrow-color': '#17a2b8',
+                            'opacity': 1,
+                            'width': 3
+                        }
+                    },
+                    {
+                        selector: 'node.dimmed',
+                        style: {
+                            'opacity': 0.15
+                        }
+                    },
+                    {
+                        selector: 'edge.dimmed',
+                        style: {
+                            'opacity': 0.1
+                        }
                     }
                 ],
                 layout: {
@@ -296,22 +305,25 @@
             // Add event listeners
             cy.on('tap', 'node', function(evt) {
                 const node = evt.target;
+                showNeighborhood(node);
                 updateStatus(`Node: ${node.data('label')} | URL: ${node.data('url')} | Depth: ${node.data('depth')}`);
             });
 
             cy.on('tap', 'edge', function(evt) {
                 const edge = evt.target;
+                showNeighborhood(edge);
                 updateStatus(`Edge: ${edge.source().data('label')} → ${edge.target().data('label')}`);
             });
 
             cy.on('tap', function(evt) {
                 if (evt.target === cy) {
+                    showAllNodes();
                     updateStatus('Graph loaded. Click nodes or edges for details.');
                 }
             });
         }
 
-        // Load graph data - tries fetch first, falls back to file input
+        // Load graph data from ./graph.json (when served via HTTP)
         function loadGraph() {
             const loading = document.getElementById('loading');
             const status = document.getElementById('status');
@@ -319,7 +331,6 @@
             loading.classList.add('active');
             status.textContent = 'Loading graph data...';
 
-            // Try to load from relative path (works when served via HTTP)
             fetch('./graph.json')
                 .then(response => {
                     if (!response.ok) {
@@ -334,48 +345,10 @@
                     updateStatus(`Graph loaded: ${data.elements.nodes.length} nodes, ${data.elements.edges.length} edges`);
                 })
                 .catch(error => {
-                    // If fetch fails (CORS or file not found), prompt for file input
                     loading.classList.remove('active');
-                    if (error.message.includes('Failed to fetch') || error.message.includes('CORS')) {
-                        updateStatus('Cannot load file directly. Please use "Choose Graph JSON File" button to select graph.json');
-                        document.getElementById('fileInput').click();
-                    } else {
-                        updateStatus(`Error loading graph: ${error.message}`);
-                        console.error('Error loading graph:', error);
-                    }
+                    updateStatus(`Error loading graph: ${error.message}`);
+                    console.error('Error loading graph:', error);
                 });
-        }
-
-        // Load graph from file input (handles file:// protocol)
-        function loadGraphFromFile(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            const loading = document.getElementById('loading');
-            const status = document.getElementById('status');
-            
-            loading.classList.add('active');
-            status.textContent = 'Loading graph data from file...';
-
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                try {
-                    const data = JSON.parse(e.target.result);
-                    graphData = data;
-                    renderGraph(data);
-                    loading.classList.remove('active');
-                    updateStatus(`Graph loaded: ${data.elements.nodes.length} nodes, ${data.elements.edges.length} edges`);
-                } catch (error) {
-                    loading.classList.remove('active');
-                    updateStatus(`Error parsing JSON: ${error.message}`);
-                    console.error('Error parsing JSON:', error);
-                }
-            };
-            reader.onerror = function() {
-                loading.classList.remove('active');
-                updateStatus('Error reading file');
-            };
-            reader.readAsText(file);
         }
 
         // Render the graph
@@ -436,6 +409,96 @@
         // Update status message
         function updateStatus(message) {
             document.getElementById('status').textContent = message;
+        }
+
+        // Show neighborhood of a selected node or edge
+        function showNeighborhood(element) {
+            if (!cy || cy.elements().length === 0) return;
+
+            // Clear previous neighborhood highlighting
+            cy.elements().removeClass('neighborhood dimmed');
+
+            let neighborhoodNodes = cy.collection();
+            let neighborhoodEdges = cy.collection();
+
+            if (element.isNode()) {
+                // For a node: include the node itself, all its neighbors, and connecting edges
+                const node = element;
+                neighborhoodNodes = neighborhoodNodes.union(node);
+                
+                // Get all connected edges (incoming and outgoing)
+                const connectedEdges = node.connectedEdges();
+                neighborhoodEdges = neighborhoodEdges.union(connectedEdges);
+                
+                // Get all neighbor nodes
+                const neighbors = node.neighborhood();
+                neighborhoodNodes = neighborhoodNodes.union(neighbors);
+            } else if (element.isEdge()) {
+                // For an edge: include the edge, source and target nodes, and their neighbors
+                const edge = element;
+                const source = edge.source();
+                const target = edge.target();
+                
+                neighborhoodEdges = neighborhoodEdges.union(edge);
+                neighborhoodNodes = neighborhoodNodes.union(source).union(target);
+                
+                // Get neighbors of source and target
+                const sourceNeighbors = source.neighborhood();
+                const targetNeighbors = target.neighborhood();
+                neighborhoodNodes = neighborhoodNodes.union(sourceNeighbors);
+                neighborhoodNodes = neighborhoodNodes.union(targetNeighbors);
+                
+                // Get edges connected to source and target
+                const sourceEdges = source.connectedEdges();
+                const targetEdges = target.connectedEdges();
+                neighborhoodEdges = neighborhoodEdges.union(sourceEdges).union(targetEdges);
+            }
+
+            // Highlight neighborhood
+            neighborhoodNodes.addClass('neighborhood');
+            neighborhoodEdges.addClass('neighborhood');
+
+            // Dim everything else
+            const allNodes = cy.nodes();
+            const allEdges = cy.edges();
+            
+            allNodes.forEach(node => {
+                if (!neighborhoodNodes.contains(node)) {
+                    node.addClass('dimmed');
+                }
+            });
+            
+            allEdges.forEach(edge => {
+                if (!neighborhoodEdges.contains(edge)) {
+                    edge.addClass('dimmed');
+                }
+            });
+
+            // Center view on the selected element
+            cy.animate({
+                center: { eles: element },
+                zoom: Math.min(cy.zoom() * 1.2, 2)
+            }, {
+                duration: 300
+            });
+
+            // Update status
+            const nodeCount = neighborhoodNodes.length;
+            const edgeCount = neighborhoodEdges.length;
+            if (element.isNode()) {
+                updateStatus(`Showing neighborhood: ${nodeCount} nodes, ${edgeCount} edges connected to "${element.data('label')}"`);
+            } else {
+                updateStatus(`Showing neighborhood: ${nodeCount} nodes, ${edgeCount} edges around selected edge`);
+            }
+        }
+
+        // Show all nodes and edges (clear neighborhood view)
+        function showAllNodes() {
+            if (!cy) return;
+            
+            cy.elements().removeClass('neighborhood dimmed');
+            cy.fit();
+            updateStatus('Showing all nodes and edges');
         }
 
         // Search functionality
@@ -561,6 +624,7 @@
         // Initialize on page load
         document.addEventListener('DOMContentLoaded', function() {
             initCytoscape();
+            loadGraph();
         });
     </script>
 </body>
