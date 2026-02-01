@@ -777,6 +777,7 @@ Environment Variables:
                             If not provided, script will automatically
                             run 'hugo list all' to generate it
   HUGO_LIST_CSV           - Hugo list CSV content (alternative to file)
+  TARGET_FILE             - Path to a specific file to generate links for
   DEBUG                   - Enable debug output (true/false)
   DRY_RUN                 - Preview changes without modifying files (true/false)
         """
@@ -822,6 +823,17 @@ Environment Variables:
         action='store_true',
         help='Preview changes without modifying files (or use DRY_RUN=true env var)'
     )
+    parser.add_argument(
+        '--target-file',
+        dest='target_file',
+        help='Path to a specific file to generate links for (or use TARGET_FILE env var). If not set, processes up to 10 published posts.'
+    )
+    parser.add_argument(
+        'path_positional',
+        nargs='?',
+        default=None,
+        help='Optional path to a specific file (same as --target-file)'
+    )
     
     args = parser.parse_args()
     
@@ -835,6 +847,7 @@ Environment Variables:
     hugo_list_csv = args.hugo_list_csv or os.environ.get('HUGO_LIST_CSV', '')
     debug = args.debug or os.environ.get('DEBUG', 'false').lower() == 'true'
     dry_run = args.dry_run or os.environ.get('DRY_RUN', 'false').lower() == 'true'
+    target_file = args.target_file or args.path_positional or os.environ.get('TARGET_FILE', '')
     
     # If prompt file is provided via command line, read it
     if args.prompt_file:
@@ -1016,14 +1029,43 @@ For Hugo sites, you can use either:
 Only link to posts that are relevant and add value to the content.
 """
     
-    # Find published files
-    published_files = find_published_files(content_folder, published_posts)
+    # Find published files (or use single target file if specified)
+    if target_file and target_file.strip():
+        # Resolve path: try as-is (relative to cwd), then relative to content_folder
+        target_path = Path(target_file.strip())
+        content_path = Path(content_folder)
+        if not target_path.is_absolute():
+            # Try relative to current working directory first
+            resolved = (Path.cwd() / target_path).resolve()
+            if not resolved.exists():
+                # Try relative to content folder
+                if content_path.is_absolute():
+                    resolved = (content_path / target_path).resolve()
+                else:
+                    resolved = (Path.cwd() / content_path / target_path).resolve()
+            target_path = resolved
+        else:
+            target_path = target_path.resolve()
+        if not target_path.exists() or not target_path.is_file():
+            print(f"Error: Target file does not exist or is not a file: {target_path}", file=sys.stderr)
+            sys.exit(1)
+        # Ensure it's under content folder for consistency (allow if path contains content)
+        if content_path.is_absolute():
+            try:
+                target_path.relative_to(content_path)
+            except ValueError:
+                pass  # Allow processing anyway when user explicitly requested this file
+        published_files = [target_path]
+        if debug:
+            print(f"Processing single target file: {target_path}")
+    else:
+        published_files = find_published_files(content_folder, published_posts)
     
     if debug:
         print(f"Found {len(published_files)} published markdown files to process")
     
     if not published_files:
-        if published_posts:
+        if published_posts and not (target_file and target_file.strip()):
             print("⚠️  Warning: Hugo list contains published posts but no matching files were found")
             print("   This may indicate a path mismatch between Hugo list and file system")
         else:
@@ -1031,12 +1073,13 @@ Only link to posts that are relevant and add value to the content.
             print("   Either the Hugo list is empty or no files match the published posts")
         sys.exit(0)
     
-    # Safety check: limit to reasonable number of files to avoid token/argument limits
-    MAX_FILES = 10
-    if len(published_files) > MAX_FILES:
-        print(f"⚠️  Warning: Found {len(published_files)} files, limiting to {MAX_FILES} to avoid processing limits")
-        published_files = published_files[:MAX_FILES]
-        print(f"   Processing first {MAX_FILES} files only")
+    # Safety check: limit to reasonable number of files to avoid token/argument limits (skip when single target file)
+    if not (target_file and target_file.strip()):
+        MAX_FILES = 10
+        if len(published_files) > MAX_FILES:
+            print(f"⚠️  Warning: Found {len(published_files)} files, limiting to {MAX_FILES} to avoid processing limits")
+            published_files = published_files[:MAX_FILES]
+            print(f"   Processing first {MAX_FILES} files only")
     
     # Read all files
     files_content = {}

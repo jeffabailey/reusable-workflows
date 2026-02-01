@@ -1,0 +1,181 @@
+{
+  "elements": {
+    "nodes": [
+      {
+        "data": {
+          "id": "#future-trends--evolving-practices",
+          "label": "Future Trends",
+          "url": "#future-trends--evolving-practices",
+          "type": "link"
+        }
+      },
+      {
+        "data": {
+          "id": "#glossary",
+          "label": "Glossary",
+          "url": "#glossary",
+          "type": "link"
+        }
+      },
+      {
+        "data": {
+          "id": "#limitations--when-to-involve-specialists",
+          "label": "Limitations & Specialists",
+          "url": "#limitations--when-to-involve-specialists",
+          "type": "link"
+        }
+      },
+      {
+        "data": {
+          "id": "#section-1-what-timeouts-are--why-they-exist",
+          "label": "What Timeouts Are",
+          "url": "#section-1-what-timeouts-are--why-they-exist",
+          "type": "link"
+        }
+      },
+      {
+        "data": {
+          "id": "#section-2-types-of-timeouts--connection-read-write-idle",
+          "label": "Types of Timeouts",
+          "url": "#section-2-types-of-timeouts--connection-read-write-idle",
+          "type": "link"
+        }
+      },
+      {
+        "data": {
+          "id": "#section-3-choosing-timeout-values",
+          "label": "Choosing Timeout Values",
+          "url": "#section-3-choosing-timeout-values",
+          "type": "link"
+        }
+      },
+      {
+        "data": {
+          "id": "#section-4-timeouts-in-distributed-systems",
+          "label": "Timeouts in Distributed Systems",
+          "url": "#section-4-timeouts-in-distributed-systems",
+          "type": "link"
+        }
+      },
+      {
+        "data": {
+          "id": "#section-5-retries-backoff-and-timeouts",
+          "label": "Retries and Timeouts",
+          "url": "#section-5-retries-backoff-and-timeouts",
+          "type": "link"
+        }
+      },
+      {
+        "data": {
+          "id": "#section-6-common-timeout-mistakes",
+          "label": "Common Mistakes",
+          "url": "#section-6-common-timeout-mistakes",
+          "type": "link"
+        }
+      },
+      {
+        "data": {
+          "id": "#section-7-common-misconceptions",
+          "label": "Misconceptions",
+          "url": "#section-7-common-misconceptions",
+          "type": "link"
+        }
+      },
+      {
+        "data": {
+          "id": "#section-8-when-not-to-rely-only-on-timeouts",
+          "label": "When Not to Rely Only on Timeouts",
+          "url": "#section-8-when-not-to-rely-only-on-timeouts",
+          "type": "link"
+        }
+      },
+      {
+        "data": {
+          "id": "/Users/jeffbailey/Projects/websites/jeffbaileyblog/hugo/content/blog/fundamentals-x/fundamentals-of-timeouts/index.md",
+          "label": "index",
+          "url": "/Users/jeffbailey/Projects/websites/jeffbaileyblog/hugo/content/blog/fundamentals-x/fundamentals-of-timeouts/index.md",
+          "type": "file"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "data": {
+          "source": "/Users/jeffbailey/Projects/websites/jeffbaileyblog/hugo/content/blog/fundamentals-x/fundamentals-of-timeouts/index.md",
+          "target": "#section-1-what-timeouts-are--why-they-exist",
+          "interaction": "Directed"
+        }
+      },
+      {
+        "data": {
+          "source": "/Users/jeffbailey/Projects/websites/jeffbaileyblog/hugo/content/blog/fundamentals-x/fundamentals-of-timeouts/index.md",
+          "target": "#section-2-types-of-timeouts--connection-read-write-idle",
+          "interaction": "Directed"
+        }
+      },
+      {
+        "data": {
+          "source": "/Users/jeffbailey/Projects/websites/jeffbaileyblog/hugo/content/blog/fundamentals-x/fundamentals-of-timeouts/index.md",
+          "target": "#section-3-choosing-timeout-values",
+          "interaction": "Directed"
+        }
+      },
+      {
+        "data": {
+          "source": "/Users/jeffbailey/Projects/websites/jeffbaileyblog/hugo/content/blog/fundamentals-x/fundamentals-of-timeouts/index.md",
+          "target": "#section-4-timeouts-in-distributed-systems",
+          "interaction": "Directed"
+        }
+      },
+      {
+        "data": {
+          "source": "/Users/jeffbailey/Projects/websites/jeffbaileyblog/hugo/content/blog/fundamentals-x/fundamentals-of-timeouts/index.md",
+          "target": "#section-5-retries-backoff-and-timeouts",
+          "interaction": "Directed"
+        }
+      },
+      {
+        "data": {
+          "source": "/Users/jeffbailey/Projects/websites/jeffbaileyblog/hugo/content/blog/fundamentals-x/fundamentals-of-timeouts/index.md",
+          "target": "#section-6-common-timeout-mistakes",
+          "interaction": "Directed"
+        }
+      },
+      {
+        "data": {
+          "source": "/Users/jeffbailey/Projects/websites/jeffbaileyblog/hugo/content/blog/fundamentals-x/fundamentals-of-timeouts/index.md",
+          "target": "#section-7-common-misconceptions",
+          "interaction": "Directed"
+        }
+      },
+      {
+        "data": {
+          "source": "/Users/jeffbailey/Projects/websites/jeffbaileyblog/hugo/content/blog/fundamentals-x/fundamentals-of-timeouts/index.md",
+          "target": "#section-8-when-not-to-rely-only-on-timeouts",
+          "interaction": "Directed"
+        }
+      },
+      {
+        "data": {
+          "source": "/Users/jeffbailey/Projects/websites/jeffbaileyblog/hugo/content/blog/fundamentals-x/fundamentals-of-timeouts/index.md",
+          "target": "#future-trends--evolving-practices",
+          "interaction": "Directed"
+        }
+      },
+      {
+        "data": {
+          "source": "/Users/jeffbailey/Projects/websites/jeffbaileyblog/hugo/content/blog/fundamentals-x/fundamentals-of-timeouts/index.md",
+          "target": "#limitations--when-to-involve-specialists",
+          "interaction": "Directed"
+        }
+      },
+      {
+        "data": {
+          "source": "/Users/jeffbailey/Projects/websites/jeffbaileyblog/hugo/content/blog/fundamentals-x/fundamentals-of-timeouts/index.md",
+          "target": "#glossary",
+          "interaction": "Directed"
+        }
+      }
+    ]
+  }
+}

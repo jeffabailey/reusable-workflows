@@ -12,6 +12,9 @@ cd /path/to/your/hugo/site
 
 # Run the script (adjust path as needed)
 ~/Projects/canzan/reusable-workflows/.github/workflows/generate-links/generate-links.sh
+
+# Or generate links for a single file (path relative to cwd or content folder)
+~/Projects/canzan/reusable-workflows/.github/workflows/generate-links/generate-links.sh content/blog/my-post/index.md
 ```
 
 Or set it as an alias in your shell:
@@ -34,6 +37,7 @@ You can customize the script behavior with environment variables:
 - `PROMPT_FILE`: Path to prompt file (default: `content/prompts/internal-link-optimize.md`)
 - `CUSTOM_PROMPT`: Custom prompt text (overrides prompt file)
 - `COPILOT_GITHUB_TOKEN`: GitHub token with Copilot API access (required)
+- `TARGET_FILE`: Path to a specific file to generate links for (optional; can also pass as first positional argument)
 - `DEBUG`: Enable debug output (`true`/`false`)
 - `DRY_RUN`: Preview changes without modifying files (`true`/`false`)
 - `REUSABLE_WORKFLOWS_DIR`: Path to reusable-workflows directory (if not in default location)

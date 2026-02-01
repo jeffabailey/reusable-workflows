@@ -1,0 +1,12 @@
+source,target,interaction
+/Users/jeffbailey/Projects/websites/jeffbaileyblog/hugo/content/blog/fundamentals-x/fundamentals-of-timeouts/index.md,#section-1-what-timeouts-are--why-they-exist,Directed
+/Users/jeffbailey/Projects/websites/jeffbaileyblog/hugo/content/blog/fundamentals-x/fundamentals-of-timeouts/index.md,#section-2-types-of-timeouts--connection-read-write-idle,Directed
+/Users/jeffbailey/Projects/websites/jeffbaileyblog/hugo/content/blog/fundamentals-x/fundamentals-of-timeouts/index.md,#section-3-choosing-timeout-values,Directed
+/Users/jeffbailey/Projects/websites/jeffbaileyblog/hugo/content/blog/fundamentals-x/fundamentals-of-timeouts/index.md,#section-4-timeouts-in-distributed-systems,Directed
+/Users/jeffbailey/Projects/websites/jeffbaileyblog/hugo/content/blog/fundamentals-x/fundamentals-of-timeouts/index.md,#section-5-retries-backoff-and-timeouts,Directed
+/Users/jeffbailey/Projects/websites/jeffbaileyblog/hugo/content/blog/fundamentals-x/fundamentals-of-timeouts/index.md,#section-6-common-timeout-mistakes,Directed
+/Users/jeffbailey/Projects/websites/jeffbaileyblog/hugo/content/blog/fundamentals-x/fundamentals-of-timeouts/index.md,#section-7-common-misconceptions,Directed
+/Users/jeffbailey/Projects/websites/jeffbaileyblog/hugo/content/blog/fundamentals-x/fundamentals-of-timeouts/index.md,#section-8-when-not-to-rely-only-on-timeouts,Directed
+/Users/jeffbailey/Projects/websites/jeffbaileyblog/hugo/content/blog/fundamentals-x/fundamentals-of-timeouts/index.md,#future-trends--evolving-practices,Directed
+/Users/jeffbailey/Projects/websites/jeffbaileyblog/hugo/content/blog/fundamentals-x/fundamentals-of-timeouts/index.md,#limitations--when-to-involve-specialists,Directed
+/Users/jeffbailey/Projects/websites/jeffbaileyblog/hugo/content/blog/fundamentals-x/fundamentals-of-timeouts/index.md,#glossary,Directed

@@ -36,6 +36,10 @@ on:
         type: boolean
         default: false
         description: "Automatically deploy after generating links"
+      target_file:
+        required: false
+        type: string
+        description: "Path to a specific file to generate links for (relative to repository root or content folder). If not set, processes up to 10 published posts."
     secrets:
       access_token:
         required: true
@@ -308,6 +312,7 @@ jobs:
           CUSTOM_PROMPT: ${{ inputs.custom_prompt }}
           DEFAULT_PROMPT: ${{ steps.read-prompt.outputs.prompt }}
           HUGO_LIST_FILE: ${{ steps.hugo-list.outputs.hugo_list_file }}
+          TARGET_FILE: ${{ inputs.target_file }}
           DEBUG: ${{ inputs.debug }}
         run: |
           python3 .github/workflows/generate-links/generate_links.py

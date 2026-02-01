@@ -6,6 +6,9 @@
 # Usage:
 #   cd /path/to/your/hugo/site
 #   /path/to/reusable-workflows/.github/workflows/generate-links/generate-links.sh
+#   /path/to/reusable-workflows/.github/workflows/generate-links/generate-links.sh [path/to/file.md]
+#
+# Optional: pass a path to generate links for a single file (relative to cwd or content folder).
 #
 # Or set as an alias:
 #   alias generate-links='/path/to/reusable-workflows/.github/workflows/generate-links/generate-links.sh'
@@ -32,12 +35,21 @@ fi
 # Make script executable
 chmod +x "$PYTHON_SCRIPT" 2>/dev/null || true
 
+# Optional: first positional argument (if not a flag) is path to a specific file
+# TARGET_FILE can also be set via environment variable
+TARGET_FILE_ARG=""
+if [ -n "${1:-}" ] && [ "${1#-}" = "$1" ]; then
+    TARGET_FILE_ARG="$1"
+    shift
+fi
+
 # Configuration - can be overridden via environment variables
 CONTENT_FOLDER="${CONTENT_FOLDER:-content/blog}"
 PROMPT_FILE="${PROMPT_FILE:-content/prompts/internal-link-optimize.md}"
 CUSTOM_PROMPT="${CUSTOM_PROMPT:-}"
 DEBUG="${DEBUG:-false}"
 DRY_RUN="${DRY_RUN:-false}"
+TARGET_FILE="${TARGET_FILE_ARG:-$TARGET_FILE}"
 
 # Required: GitHub Copilot token
 if [ -z "$COPILOT_GITHUB_TOKEN" ]; then
@@ -199,6 +211,7 @@ export DEFAULT_PROMPT
 export HUGO_LIST_FILE="$HUGO_LIST_FILE"
 export DEBUG
 export DRY_RUN
+[ -n "$TARGET_FILE" ] && export TARGET_FILE
 
 if [ "$DEBUG" = "true" ]; then
     echo -e "${BLUE}Environment variables:${NC}"
@@ -207,14 +220,15 @@ if [ "$DEBUG" = "true" ]; then
     echo "  CUSTOM_PROMPT: ${CUSTOM_PROMPT:+set (${#CUSTOM_PROMPT} chars)}"
     echo "  DEFAULT_PROMPT: ${#DEFAULT_PROMPT} characters"
     echo "  HUGO_LIST_FILE: $HUGO_LIST_FILE"
+    echo "  TARGET_FILE: ${TARGET_FILE:-<not set>}"
     echo "  DEBUG: $DEBUG"
     echo "  DRY_RUN: $DRY_RUN"
     echo ""
 fi
 
-# Run the Python script
+# Run the Python script (pass through any remaining args, e.g. --debug, --dry-run)
 echo -e "${BLUE}Running Python script to generate links...${NC}"
-python3 "$PYTHON_SCRIPT"
+python3 "$PYTHON_SCRIPT" "$@"
 
 EXIT_CODE=$?
 

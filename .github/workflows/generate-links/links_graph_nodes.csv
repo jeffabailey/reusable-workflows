@@ -1,0 +1,13 @@
+id,label,url,type
+#future-trends--evolving-practices,Future Trends,#future-trends--evolving-practices,link
+#glossary,Glossary,#glossary,link
+#limitations--when-to-involve-specialists,Limitations & Specialists,#limitations--when-to-involve-specialists,link
+#section-1-what-timeouts-are--why-they-exist,What Timeouts Are,#section-1-what-timeouts-are--why-they-exist,link
+#section-2-types-of-timeouts--connection-read-write-idle,Types of Timeouts,#section-2-types-of-timeouts--connection-read-write-idle,link
+#section-3-choosing-timeout-values,Choosing Timeout Values,#section-3-choosing-timeout-values,link
+#section-4-timeouts-in-distributed-systems,Timeouts in Distributed Systems,#section-4-timeouts-in-distributed-systems,link
+#section-5-retries-backoff-and-timeouts,Retries and Timeouts,#section-5-retries-backoff-and-timeouts,link
+#section-6-common-timeout-mistakes,Common Mistakes,#section-6-common-timeout-mistakes,link
+#section-7-common-misconceptions,Misconceptions,#section-7-common-misconceptions,link
+#section-8-when-not-to-rely-only-on-timeouts,When Not to Rely Only on Timeouts,#section-8-when-not-to-rely-only-on-timeouts,link
+/Users/jeffbailey/Projects/websites/jeffbaileyblog/hugo/content/blog/fundamentals-x/fundamentals-of-timeouts/index.md,index,/Users/jeffbailey/Projects/websites/jeffbaileyblog/hugo/content/blog/fundamentals-x/fundamentals-of-timeouts/index.md,file
