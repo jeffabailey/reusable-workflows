@@ -46,8 +46,7 @@ jobs:
       - name: Checkout website repository
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.website_repository }}
-          token: ${{ secrets.access_token }}
+          repository: ${{ github.repository }}
           fetch-depth: 1
           path: website
 
