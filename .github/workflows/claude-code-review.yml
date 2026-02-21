@@ -1,0 +1,106 @@
+# Reusable Claude Code Review workflow — architecture fitness, JIT test gen, security
+# Call from any repo that wants automated code review on PRs or before deploy.
+#
+# Usage:
+#   jobs:
+#     claude-review:
+#       uses: jeffabailey/reusable-workflows/.github/workflows/claude-code-review.yml@master
+#       secrets: inherit
+
+name: Claude Code Review Suite
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        required: false
+        type: string
+        description: "Git ref to review (e.g. PR head SHA). Defaults to github.sha"
+      run_arch_fitness:
+        required: false
+        type: boolean
+        default: true
+        description: "Run architectural fitness analysis"
+      run_jit_test_gen:
+        required: false
+        type: boolean
+        default: true
+        description: "Run JIT catching test generation analysis"
+      run_security:
+        required: false
+        type: boolean
+        default: true
+        description: "Run security review"
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: true
+        description: "Anthropic API key for Claude (must be enabled for both Claude API and Claude Code)"
+
+jobs:
+  arch-fitness:
+    if: ${{ inputs.run_arch_fitness != false }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+
+      - uses: anthropics/claude-code-action@edd85d61533cbba7b57ed0ca4af1750b1fdfd3c4 # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Analyze the PR diff for architectural fitness. Score these dimensions (1-10):
+            coupling, cohesion, testability, layering violations, API surface area,
+            error handling consistency, configuration hygiene.
+
+            Provide specific file:line evidence for each score.
+            Flag any scores below 6 as action items.
+            Be critical — this is a quality gate, not a cheerleader.
+          claude_args: "--max-turns 10"
+
+  jit-test-gen:
+    if: ${{ inputs.run_jit_test_gen != false }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+
+      - uses: anthropics/claude-code-action@edd85d61533cbba7b57ed0ca4af1750b1fdfd3c4 # v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Analyze the changed files in this PR. For each changed function/method:
+            1. Does adequate test coverage exist?
+            2. What edge cases are untested?
+            3. Suggest specific test cases that would catch regressions
+               at the point of this change (JIT catching approach).
+            Reference: https://jeffbailey.us/blog/2026/02/14/what-is-just-in-time-catching-test-generation/
+
+            Be specific — include actual test code snippets in your suggestions.
+          claude_args: "--max-turns 8"
+
+  security:
+    if: ${{ inputs.run_security != false }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 2
+
+      - uses: anthropics/claude-code-security-review@0c6a49f1fa56a1d472575da86a94dbc1edb78eda # main
+        with:
+          claude-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          comment-pr: true
