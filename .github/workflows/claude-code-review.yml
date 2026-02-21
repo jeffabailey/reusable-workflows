@@ -1,5 +1,6 @@
 # Reusable Claude Code Review workflow — architecture fitness, JIT test gen, security
 # Call from any repo that wants automated code review on PRs or before deploy.
+# Prompts aligned with: https://github.com/jeffabailey/skills (review-arch-fitness, review-jit-test-gen)
 #
 # Usage:
 #   jobs:
