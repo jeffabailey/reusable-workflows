@@ -108,6 +108,7 @@ jobs:
           aws s3 sync ./hugo/data s3://${{ inputs.s3_bucket_name }}/data \
             --acl public-read \
             --cache-control max-age=31536000,public \
+            --content-type application/jsonc \
             --only-show-errors
 
       - name: Cloudfront Invalidate
