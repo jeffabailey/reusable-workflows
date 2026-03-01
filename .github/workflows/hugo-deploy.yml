@@ -114,12 +114,10 @@ jobs:
           if [ "${{ inputs.debug }}" = "true" ]; then
             echo "🐛 Debug mode enabled - running S3 sync with verbose output"
             aws s3 sync ./hugo/public s3://${{ inputs.s3_bucket_name }} \
-              --delete \
               --acl public-read \
               --cache-control max-age=31536000,public
           else
             aws s3 sync ./hugo/public s3://${{ inputs.s3_bucket_name }} \
-              --delete \
               --acl public-read \
               --cache-control max-age=31536000,public \
               --only-show-errors
