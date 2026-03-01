@@ -99,6 +99,10 @@ jobs:
         timeout-minutes: 15
         run: hugo --minify --gc
 
+      - name: Convert JSONC to JSON
+        run: |
+          find ./hugo/data -name '*.jsonc' -exec sh -c 'npx -y json5 -s 2 "$1" > "${1%.jsonc}.json"' _ {} \;
+
       - name: S3 Sync
         run: |
           aws s3 sync ./hugo/public s3://${{ inputs.s3_bucket_name }} \
@@ -108,6 +112,17 @@ jobs:
           aws s3 sync ./hugo/data s3://${{ inputs.s3_bucket_name }}/data \
             --acl public-read \
             --cache-control max-age=31536000,public \
+            --only-show-errors
+          aws s3 sync ./hugo/data s3://${{ inputs.s3_bucket_name }}/data \
+            --acl public-read \
+            --cache-control max-age=31536000,public \
+            --exclude '*' --include '*.json' \
+            --content-type application/json \
+            --only-show-errors
+          aws s3 sync ./hugo/data s3://${{ inputs.s3_bucket_name }}/data \
+            --acl public-read \
+            --cache-control max-age=31536000,public \
+            --exclude '*' --include '*.jsonc' \
             --content-type application/jsonc \
             --only-show-errors
 
