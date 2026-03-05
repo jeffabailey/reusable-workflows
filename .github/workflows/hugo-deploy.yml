@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       website_repository:
-        required: true
+        required: false
         type: string
       s3_bucket_name:
         required: true
@@ -40,7 +40,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.website_repository }}
+          repository: ${{ inputs.website_repository || github.repository }}
           token: ${{ secrets.access_token }}
           fetch-depth: 1
 
