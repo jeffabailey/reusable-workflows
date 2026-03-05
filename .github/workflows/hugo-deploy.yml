@@ -101,7 +101,9 @@ jobs:
 
       - name: Convert JSONC to JSON
         run: |
-          find ./hugo/data -name '*.jsonc' -exec sh -c 'npx -y json5 -s 2 "$1" > "${1%.jsonc}.json"' _ {} \;
+          if [ -d ./hugo/data ]; then
+            find ./hugo/data -name '*.jsonc' -exec sh -c 'npx -y json5 -s 2 "$1" > "${1%.jsonc}.json"' _ {} \;
+          fi
 
       - name: S3 Sync
         run: |
