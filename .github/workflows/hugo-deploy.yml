@@ -111,22 +111,24 @@ jobs:
             --acl public-read \
             --cache-control max-age=31536000,public \
             --only-show-errors
-          aws s3 sync ./hugo/data s3://${{ inputs.s3_bucket_name }}/data \
-            --acl public-read \
-            --cache-control max-age=31536000,public \
-            --only-show-errors
-          aws s3 sync ./hugo/data s3://${{ inputs.s3_bucket_name }}/data \
-            --acl public-read \
-            --cache-control max-age=31536000,public \
-            --exclude '*' --include '*.json' \
-            --content-type application/json \
-            --only-show-errors
-          aws s3 sync ./hugo/data s3://${{ inputs.s3_bucket_name }}/data \
-            --acl public-read \
-            --cache-control max-age=31536000,public \
-            --exclude '*' --include '*.jsonc' \
-            --content-type application/jsonc \
-            --only-show-errors
+          if [ -d ./hugo/data ]; then
+            aws s3 sync ./hugo/data s3://${{ inputs.s3_bucket_name }}/data \
+              --acl public-read \
+              --cache-control max-age=31536000,public \
+              --only-show-errors
+            aws s3 sync ./hugo/data s3://${{ inputs.s3_bucket_name }}/data \
+              --acl public-read \
+              --cache-control max-age=31536000,public \
+              --exclude '*' --include '*.json' \
+              --content-type application/json \
+              --only-show-errors
+            aws s3 sync ./hugo/data s3://${{ inputs.s3_bucket_name }}/data \
+              --acl public-read \
+              --cache-control max-age=31536000,public \
+              --exclude '*' --include '*.jsonc' \
+              --content-type application/jsonc \
+              --only-show-errors
+          fi
 
       - name: Cloudfront Invalidate
         run: |
