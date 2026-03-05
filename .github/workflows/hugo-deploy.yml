@@ -51,7 +51,7 @@ jobs:
           path: ./
 
       - name: Set Default Git Branch
-        run: git config --global init.defaultBranch master
+        run: git config --global init.defaultBranch main
 
       # Setup Hugo (pin to the version you're actually using from the log)
       - name: Setup Hugo
