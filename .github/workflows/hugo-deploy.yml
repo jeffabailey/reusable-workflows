@@ -43,6 +43,7 @@ jobs:
           repository: ${{ inputs.website_repository || github.repository }}
           token: ${{ secrets.access_token }}
           fetch-depth: 1
+          submodules: recursive
 
       # Load env vars from .env (same as before)
       - name: Simple Dotenv
