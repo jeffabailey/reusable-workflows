@@ -99,6 +99,9 @@ jobs:
         timeout-minutes: 15
         run: hugo --minify --gc
 
+      - name: List Built Files
+        run: find ./hugo/public -type f | sort
+
       - name: Convert JSONC to JSON
         run: |
           if [ -d ./hugo/data ]; then
