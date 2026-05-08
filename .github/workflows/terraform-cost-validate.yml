@@ -104,6 +104,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Fail with a domain-meaningful error if the caller's working_directory
+      # input does not exist in the checked-out repo. Without this, downstream
+      # `working-directory:` shell steps fail with an opaque
+      # "An error occurred trying to start process '/usr/bin/bash' ...
+      #  No such file or directory" message that does not name the offending
+      # input or path.
+      - name: Verify working directory exists
+        env:
+          WD: ${{ inputs.working_directory }}
+        run: |
+          if [ -z "$WD" ]; then
+            echo "::error title=Empty working_directory input::The 'working_directory' input is empty. Set it in the caller workflow."
+            exit 1
+          fi
+          if [ ! -d "$WD" ]; then
+            echo "::error title=Missing working_directory::Directory '$WD' does not exist in this repository at $GITHUB_SHA. Either create the Terraform module at that path or update the caller's 'working_directory' input."
+            exit 1
+          fi
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -145,6 +164,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Verify working directory exists
+        env:
+          WD: ${{ inputs.working_directory }}
+        run: |
+          if [ -z "$WD" ]; then
+            echo "::error title=Empty working_directory input::The 'working_directory' input is empty. Set it in the caller workflow."
+            exit 1
+          fi
+          if [ ! -d "$WD" ]; then
+            echo "::error title=Missing working_directory::Directory '$WD' does not exist in this repository at $GITHUB_SHA. Either create the Terraform module at that path or update the caller's 'working_directory' input."
+            exit 1
+          fi
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
