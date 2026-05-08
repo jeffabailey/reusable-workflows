@@ -112,7 +112,7 @@ jobs:
       # init / validate / plan all become no-ops (exit 0), which lets the
       # CI pipeline land before the Terraform module does. An empty input
       # still fails — that is a real misconfiguration in the caller.
-      - name: Ensure working directory exists
+      - name: Ensure working directory exists with at least a placeholder
         env:
           WD: ${{ inputs.working_directory }}
         run: |
@@ -123,6 +123,23 @@ jobs:
           if [ ! -d "$WD" ]; then
             echo "::notice title=Creating working_directory::'$WD' does not exist at $GITHUB_SHA — creating an empty directory so the validate/plan pipeline becomes a no-op until the Terraform module lands."
             mkdir -p "$WD"
+          fi
+          # `terraform plan` (unlike `validate`) refuses an empty config dir
+          # with "Error: No configuration files". Drop a minimal placeholder
+          # so the plan no-ops cleanly until real .tf files land.
+          shopt -s nullglob
+          tf_files=( "$WD"/*.tf "$WD"/*.tf.json )
+          if [ ${#tf_files[@]} -eq 0 ]; then
+            echo "::notice title=Adding placeholder.tf::No .tf files found in '$WD' — writing a minimal placeholder so 'terraform plan' no-ops."
+            cat > "$WD/placeholder.tf" <<'EOF'
+          # Auto-injected by the reusable terraform-cost-validate workflow when
+          # the caller's working_directory has no .tf files yet. Lets
+          # `terraform plan` no-op until the real module lands. Safe to delete
+          # once any real configuration is present.
+          terraform {
+            required_version = ">= 1.10"
+          }
+          EOF
           fi
 
       - name: Setup Terraform
@@ -167,7 +184,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Ensure working directory exists
+      - name: Ensure working directory exists with at least a placeholder
         env:
           WD: ${{ inputs.working_directory }}
         run: |
@@ -178,6 +195,23 @@ jobs:
           if [ ! -d "$WD" ]; then
             echo "::notice title=Creating working_directory::'$WD' does not exist at $GITHUB_SHA — creating an empty directory so the validate/plan pipeline becomes a no-op until the Terraform module lands."
             mkdir -p "$WD"
+          fi
+          # `terraform plan` (unlike `validate`) refuses an empty config dir
+          # with "Error: No configuration files". Drop a minimal placeholder
+          # so the plan no-ops cleanly until real .tf files land.
+          shopt -s nullglob
+          tf_files=( "$WD"/*.tf "$WD"/*.tf.json )
+          if [ ${#tf_files[@]} -eq 0 ]; then
+            echo "::notice title=Adding placeholder.tf::No .tf files found in '$WD' — writing a minimal placeholder so 'terraform plan' no-ops."
+            cat > "$WD/placeholder.tf" <<'EOF'
+          # Auto-injected by the reusable terraform-cost-validate workflow when
+          # the caller's working_directory has no .tf files yet. Lets
+          # `terraform plan` no-op until the real module lands. Safe to delete
+          # once any real configuration is present.
+          terraform {
+            required_version = ">= 1.10"
+          }
+          EOF
           fi
 
       - name: Setup Terraform
