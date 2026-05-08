@@ -1,0 +1,286 @@
+# Reusable: Terraform Validate + Plan (cost-feature pattern)
+#
+# Validation-only pipeline for a Terraform module that uses:
+#   - AWS provider with profile-based auth (the workflow writes
+#     ~/.aws/credentials in the runner under a profile whose name is the
+#     STS-derived account ID)
+#   - S3 state backend with use_lockfile = true (Terraform >= 1.10)
+#   - Optional Databricks provider (auths via DATABRICKS_HOST + DATABRICKS_TOKEN
+#     env vars, auto-read by the provider)
+#
+# Steps performed:
+#   1. terraform fmt -check -recursive
+#   2. terraform init -backend=false + terraform validate
+#   3. tflint --recursive
+#   4. terraform plan (full pipeline; per-account state-key segment derived
+#      from sts:GetCallerIdentity at runtime so any account whose secrets
+#      are in the caller is automatically supported)
+#   5. PR comment with plan output (skipped on push / workflow_dispatch)
+#
+# Does NOT run terraform apply. Apply is the caller's responsibility,
+# typically from an operator laptop.
+#
+# Caller pattern:
+#
+#   name: Terraform Cost Feature CI
+#   on:
+#     pull_request: { branches: [main], paths: ['infrastructure/cost/**'] }
+#     push:         { branches: [main], paths: ['infrastructure/cost/**'] }
+#     workflow_dispatch: {}
+#   jobs:
+#     ci:
+#       uses: jeffabailey/reusable-workflows/.github/workflows/terraform-cost-validate.yml@master
+#       with:
+#         working_directory: infrastructure/cost
+#         state_backend_bucket: jeffbaileyterraformstate
+#         state_backend_key_prefix: feature/aws-cur-databricks-integration
+#       secrets:
+#         aws_access_key_id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+#         aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+#         databricks_host:       ${{ secrets.DATABRICKS_HOST }}
+#         databricks_token:      ${{ secrets.DATABRICKS_TOKEN }}
+#         alert_email:           ${{ secrets.ALERT_EMAIL }}
+#
+# Status check naming (for branch protection): the caller's job id (`ci`
+# above) prefixes the reusable workflow's job names. With the example
+# caller, the resulting status checks are:
+#   - ci / validate
+#   - ci / plan
+
+name: Terraform Validate + Plan (cost-feature reusable)
+
+on:
+  workflow_call:
+    inputs:
+      working_directory:
+        description: "Directory containing the Terraform configuration (e.g. infrastructure/cost)."
+        required: true
+        type: string
+      terraform_version:
+        description: "Terraform version. Defaults to 1.10.3 (>= 1.10 required for S3 native lockfile)."
+        type: string
+        default: "1.10.3"
+      tflint_version:
+        description: "TFLint version tag (e.g. v0.53.0)."
+        type: string
+        default: "v0.53.0"
+      aws_region:
+        description: "AWS region for the AWS provider workload (not the state backend region)."
+        type: string
+        default: "us-east-1"
+      state_backend_bucket:
+        description: "S3 bucket name holding the Terraform state. Region inferred by Terraform from the bucket."
+        required: true
+        type: string
+      state_backend_key_prefix:
+        description: "Per-feature state-key prefix without trailing slash (e.g. feature/aws-cur-databricks-integration). The workflow appends '<account_id>/terraform.tfstate'."
+        required: true
+        type: string
+      plan_environment:
+        description: "GitHub Environment name to gate the plan job. Set to empty to skip the gate."
+        type: string
+        default: "plan"
+    secrets:
+      aws_access_key_id:
+        required: true
+      aws_secret_access_key:
+        required: true
+      databricks_host:
+        required: true
+      databricks_token:
+        required: true
+      alert_email:
+        required: true
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "0"
+
+jobs:
+  validate:
+    name: Validate (fmt + validate + tflint)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform_version }}
+          terraform_wrapper: false
+
+      - name: Terraform fmt (recursive, check-only)
+        working-directory: ${{ inputs.working_directory }}
+        run: terraform fmt -check -recursive -diff
+
+      - name: Terraform init (no backend, validate-only)
+        working-directory: ${{ inputs.working_directory }}
+        run: terraform init -backend=false
+
+      - name: Terraform validate
+        working-directory: ${{ inputs.working_directory }}
+        run: terraform validate
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: ${{ inputs.tflint_version }}
+
+      - name: TFLint init
+        working-directory: ${{ inputs.working_directory }}
+        run: tflint --init
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: TFLint
+        working-directory: ${{ inputs.working_directory }}
+        run: tflint --recursive --format compact
+
+  plan:
+    name: Plan (AWS + Databricks)
+    runs-on: ubuntu-latest
+    needs: validate
+    environment: ${{ inputs.plan_environment }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform_version }}
+          terraform_wrapper: false
+
+      # Two-step credentials setup:
+      #   1) Inject env-var creds so we can call sts:GetCallerIdentity to
+      #      learn the account ID.
+      #   2) Write ~/.aws/credentials with that account ID as the profile
+      #      name, because the AWS Terraform provider has
+      #      `profile = var.aws_profile` set and therefore reads from a
+      #      named profile (it ignores AWS_ACCESS_KEY_ID env vars when
+      #      `profile` is configured). Runner is ephemeral; the file is
+      #      gone at job teardown.
+      - name: Configure AWS env credentials (for STS lookup)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.aws_access_key_id }}
+          aws-secret-access-key: ${{ secrets.aws_secret_access_key }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Derive AWS account ID
+        id: account
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          if [ -z "$ACCOUNT_ID" ] || ! [[ "$ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+            echo "::error::sts:GetCallerIdentity returned unexpected account id: '$ACCOUNT_ID'"
+            exit 1
+          fi
+          echo "account_id=$ACCOUNT_ID" >> "$GITHUB_OUTPUT"
+          echo "Derived account ID: $ACCOUNT_ID"
+
+      - name: Write ~/.aws/credentials (profile = account_id)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.aws_access_key_id }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.aws_secret_access_key }}
+          PROFILE_NAME: ${{ steps.account.outputs.account_id }}
+        run: |
+          mkdir -p ~/.aws
+          umask 077
+          {
+            printf '[%s]\n' "$PROFILE_NAME"
+            printf 'aws_access_key_id = %s\n'     "$AWS_ACCESS_KEY_ID"
+            printf 'aws_secret_access_key = %s\n' "$AWS_SECRET_ACCESS_KEY"
+          } > ~/.aws/credentials
+          chmod 600 ~/.aws/credentials
+
+      - name: Terraform init (with backend)
+        working-directory: ${{ inputs.working_directory }}
+        run: |
+          terraform init \
+            -backend-config="key=${{ inputs.state_backend_key_prefix }}/${{ steps.account.outputs.account_id }}/terraform.tfstate" \
+            -reconfigure
+
+      # Full plan including the Databricks-side child module. Databricks
+      # provider authenticates via DATABRICKS_HOST + DATABRICKS_TOKEN env
+      # vars (auto-read by the provider). AWS provider authenticates via
+      # the credentials file written above.
+      - name: Terraform plan
+        id: plan
+        working-directory: ${{ inputs.working_directory }}
+        env:
+          TF_VAR_aws_profile: ${{ steps.account.outputs.account_id }}
+          TF_VAR_aws_region: ${{ inputs.aws_region }}
+          TF_VAR_databricks_host: ${{ secrets.databricks_host }}
+          TF_VAR_alert_email: ${{ secrets.alert_email }}
+          DATABRICKS_HOST: ${{ secrets.databricks_host }}
+          DATABRICKS_TOKEN: ${{ secrets.databricks_token }}
+        run: |
+          set +e
+          terraform plan \
+            -no-color \
+            -detailed-exitcode \
+            -out=tfplan.binary \
+            > plan.txt 2>&1
+          EXITCODE=$?
+          echo "exitcode=$EXITCODE" >> "$GITHUB_OUTPUT"
+          # Exit codes: 0 = no changes, 2 = changes detected (expected for
+          # feature PRs), 1 = error.
+          if [ "$EXITCODE" = "1" ]; then
+            cat plan.txt
+            exit 1
+          fi
+          exit 0
+
+      - name: Upload plan artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ github.run_id }}
+          path: |
+            ${{ inputs.working_directory }}/tfplan.binary
+            ${{ inputs.working_directory }}/plan.txt
+          retention-days: 14
+
+      - name: Comment plan on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          PLAN_PATH: ${{ inputs.working_directory }}/plan.txt
+          ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
+          PLAN_EXIT: ${{ steps.plan.outputs.exitcode }}
+          RUN_ID: ${{ github.run_id }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const planText = fs.readFileSync(process.env.PLAN_PATH, 'utf8');
+            const truncated = planText.length > 60000
+              ? planText.slice(0, 60000) + `\n\n...[truncated; download artifact tfplan-${process.env.RUN_ID} for full plan]`
+              : planText;
+            const exit = process.env.PLAN_EXIT;
+            const summary = exit === '0'
+              ? 'No changes. Infrastructure matches the configuration.'
+              : exit === '2'
+                ? 'Changes detected (this is expected for feature PRs).'
+                : 'Plan errored.';
+            const body = [
+              '## Terraform plan (AWS + Databricks)',
+              '',
+              `**AWS Account**: \`${process.env.ACCOUNT_ID}\``,
+              `**Status**: ${summary}`,
+              '',
+              '<details><summary>Plan output</summary>',
+              '',
+              '```hcl',
+              truncated,
+              '```',
+              '',
+              '</details>'
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body
+            });

@@ -4,6 +4,62 @@ This repository contains reusable GitHub Actions workflows for common deployment
 
 ## Available Workflows
 
+### `terraform-cost-validate.yml`
+A reusable Terraform CI pipeline that runs `fmt`, `validate`, `tflint`, and a full `plan` (AWS + Databricks providers). Designed for modules using:
+- AWS provider with profile-based auth (the workflow writes `~/.aws/credentials` with the STS-derived account ID as the profile name).
+- S3 state backend with `use_lockfile = true` (Terraform >= 1.10).
+- Optional Databricks provider (auths via `DATABRICKS_HOST` + `DATABRICKS_TOKEN` env vars).
+
+**Features:**
+- `terraform fmt -check -recursive`, `terraform validate`, `tflint --recursive`.
+- `terraform plan` (no `-target` filter); full pipeline including Databricks-side resources.
+- Per-account state-key derivation: state lives at `<state_backend_key_prefix>/<aws_account_id>/terraform.tfstate`, so any account whose secrets are configured in the caller is automatically supported.
+- PR comment with truncated plan output and a downloadable plan-binary artifact.
+- Plan job is gated by a GitHub Environment (default name `plan`); set `plan_environment: ""` to skip the gate.
+
+**Inputs:**
+- `working_directory` (required): directory containing the Terraform configuration (e.g. `infrastructure/cost`).
+- `state_backend_bucket` (required): S3 bucket holding the Terraform state.
+- `state_backend_key_prefix` (required): per-feature key prefix without trailing slash (e.g. `feature/aws-cur-databricks-integration`). The workflow appends `<account_id>/terraform.tfstate`.
+- `terraform_version` (optional, default `1.10.3`).
+- `tflint_version` (optional, default `v0.53.0`).
+- `aws_region` (optional, default `us-east-1`): AWS workload region (not the state-backend region).
+- `plan_environment` (optional, default `plan`): GitHub Environment name to gate the plan job on; set to `""` to skip.
+
+**Secrets:**
+- `aws_access_key_id` (required).
+- `aws_secret_access_key` (required).
+- `databricks_host` (required): Databricks workspace URL.
+- `databricks_token` (required): personal access token for the workspace.
+- `alert_email` (required): used as `TF_VAR_alert_email`.
+
+**Status check naming for branch protection:** the caller's job id prefixes the reusable's job names. With a caller job named `ci`, branch protection should require `ci / validate` and `ci / plan`.
+
+**Caller example:**
+```yaml
+name: Terraform Cost Feature CI
+on:
+  pull_request: { branches: [main], paths: ['infrastructure/cost/**'] }
+  push:         { branches: [main], paths: ['infrastructure/cost/**'] }
+  workflow_dispatch: {}
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  ci:
+    uses: jeffabailey/reusable-workflows/.github/workflows/terraform-cost-validate.yml@master
+    with:
+      working_directory: infrastructure/cost
+      state_backend_bucket: jeffbaileyterraformstate
+      state_backend_key_prefix: feature/aws-cur-databricks-integration
+    secrets:
+      aws_access_key_id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+      aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      databricks_host:       ${{ secrets.DATABRICKS_HOST }}
+      databricks_token:      ${{ secrets.DATABRICKS_TOKEN }}
+      alert_email:           ${{ secrets.ALERT_EMAIL }}
+```
+
 ### `hugo-deploy.yml`
 A comprehensive Hugo deployment workflow that builds and deploys Hugo sites to AWS S3 with CloudFront invalidation.
 
