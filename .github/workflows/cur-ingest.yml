@@ -1,0 +1,360 @@
+# Reusable: CUR -> Databricks ingest (operational data plane)
+#
+# Daily incremental ingest of AWS CUR 2.0 Parquet exports into a
+# Databricks Delta bronze table, plus refresh of Silver / Gold views.
+# Replaces the Databricks Auto Loader scheduled job that ADR-013 (in
+# jeffabailey/jeffbaileyblog) documents as disabled on Free Edition /
+# inactive-org workspaces. Uses the Databricks SQL Statement Execution
+# API against an existing SQL warehouse — Free Edition supports SQL
+# warehouses but not scheduled jobs.
+#
+# Sibling: jeffabailey/reusable-workflows/.github/workflows/terraform-cost-validate.yml
+# is the validation plane (terraform plan only — never moves data).
+# This workflow is the operational plane (this is where the data flows).
+#
+# Steps performed (per call):
+#   1. Checkout this reusable-workflows repo at `ref` for SQL view templates.
+#   2. Configure AWS env credentials (for sts:GetCallerIdentity only).
+#   3. Resolve account ID, catalog (override or UC auto-detect), schema
+#      (cur_<account_id>), bucket (cur-<account_id>-<region>).
+#   4. Probe s3://<bucket>/cur/ for Parquet — exit 0 cleanly if none yet
+#      (idempotent across the AWS BCM cold-start window).
+#   5. Look up the SQL warehouse by name and start it if STOPPED.
+#   6. Run ingest SQL via the Statement Execution API:
+#        - CREATE TABLE IF NOT EXISTS bronze (zero rows on first run)
+#        - COPY INTO bronze (incremental, idempotent — file URIs tracked)
+#        - CREATE OR REPLACE VIEW (Silver, Gold) from sql/cur-ingest/*.sql
+#        - SELECT count(*) sanity check
+#
+# Caller pattern:
+#
+#   name: CUR Ingest (Daily)
+#   on:
+#     schedule:
+#       - cron: '0 7 * * *'   # ~1h after AWS CUR delivery window
+#     workflow_dispatch: {}
+#   permissions:
+#     contents: read
+#   jobs:
+#     ingest:
+#       uses: jeffabailey/reusable-workflows/.github/workflows/cur-ingest.yml@master
+#       with:
+#         cur_bucket_region: us-west-2
+#       secrets:
+#         aws_access_key_id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+#         aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+#         databricks_host:       ${{ secrets.DATABRICKS_HOST }}
+#         databricks_token:      ${{ secrets.DATABRICKS_TOKEN }}
+#
+# Catalog auto-detection: if `catalog_name` is unset, the workflow asks
+# Unity Catalog for any catalog named like `aws_billing*` that contains
+# the schema `cur_<account_id>` and uses the first match. This handles
+# the canzan = "aws_billing" / jeff = "aws_billing_jeff" naming split
+# without requiring per-account configuration. Override with `catalog_name`
+# when auto-detection is wrong or ambiguous.
+
+name: CUR Ingest (cost-feature reusable)
+
+on:
+  workflow_call:
+    inputs:
+      aws_region:
+        description: "AWS region used for the sts:GetCallerIdentity call. Independent of where CUR delivers (cur_bucket_region)."
+        type: string
+        default: "us-east-1"
+      cur_bucket_region:
+        description: "Region of the CUR delivery S3 bucket (cur-<account_id>-<region>)."
+        type: string
+        default: "us-west-2"
+      catalog_name:
+        description: "Override the Unity Catalog catalog name. Empty = auto-detect by querying UC for an aws_billing* catalog that contains schema cur_<account_id>."
+        type: string
+        default: ""
+      warehouse_name:
+        description: "Existing SQL warehouse name (case-sensitive). Must be pre-provisioned; this workflow does not create one."
+        type: string
+        default: "Serverless Starter Warehouse"
+      ref:
+        description: "Ref of jeffabailey/reusable-workflows to checkout for SQL view templates. Pin to a tag for reproducibility; default 'master' tracks latest."
+        type: string
+        default: "master"
+    secrets:
+      aws_access_key_id:
+        required: true
+      aws_secret_access_key:
+        required: true
+      databricks_host:
+        required: true
+      databricks_token:
+        required: true
+
+jobs:
+  ingest:
+    name: COPY INTO bronze + refresh Silver/Gold views
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout this reusable-workflows repo (NOT the caller's) — the SQL
+      # view templates at sql/cur-ingest/*.sql are the canonical source of
+      # truth and travel with this workflow.
+      - name: Checkout reusable-workflows (for SQL templates)
+        uses: actions/checkout@v4
+        with:
+          repository: jeffabailey/reusable-workflows
+          ref: ${{ inputs.ref }}
+          path: _reusable
+
+      - name: Configure AWS credentials (for STS lookup)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.aws_access_key_id }}
+          aws-secret-access-key: ${{ secrets.aws_secret_access_key }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Derive account ID and resource names
+        id: ctx
+        env:
+          DATABRICKS_HOST: ${{ secrets.databricks_host }}
+          DATABRICKS_TOKEN: ${{ secrets.databricks_token }}
+          CUR_CATALOG_NAME: ${{ inputs.catalog_name }}
+          CUR_BUCKET_REGION: ${{ inputs.cur_bucket_region }}
+        run: |
+          set -euo pipefail
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          if ! [[ "$ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+            echo "::error::sts:GetCallerIdentity returned unexpected account id: '$ACCOUNT_ID'"
+            exit 1
+          fi
+          SCHEMA="cur_${ACCOUNT_ID}"
+          BUCKET="cur-${ACCOUNT_ID}-${CUR_BUCKET_REGION}"
+
+          # Catalog resolution:
+          #   1. If input CUR_CATALOG_NAME is set, use it verbatim.
+          #   2. Otherwise auto-detect: find an "aws_billing*" catalog that
+          #      contains schema cur_<account_id>.
+          #   3. Fall back to "aws_billing" if no candidate has the schema
+          #      (likely means terraform apply hasn't run for this account
+          #      yet — SQL will then fail clearly at COPY INTO time).
+          if [ -n "${CUR_CATALOG_NAME:-}" ]; then
+            CATALOG="$CUR_CATALOG_NAME"
+            echo "Catalog override from input: $CATALOG"
+          else
+            echo "Auto-detecting catalog containing schema $SCHEMA..."
+            CANDIDATES=$(curl -fsSL \
+              -H "Authorization: Bearer $DATABRICKS_TOKEN" \
+              "$DATABRICKS_HOST/api/2.1/unity-catalog/catalogs" \
+              | jq -r '.catalogs[]? | select(.name | startswith("aws_billing")) | .name')
+            CATALOG=""
+            for c in $CANDIDATES; do
+              HAS_SCHEMA=$(curl -fsSL \
+                -H "Authorization: Bearer $DATABRICKS_TOKEN" \
+                "$DATABRICKS_HOST/api/2.1/unity-catalog/schemas?catalog_name=$c" \
+                | jq -r --arg s "$SCHEMA" '.schemas[]? | select(.name==$s) | .name')
+              if [ -n "$HAS_SCHEMA" ]; then
+                CATALOG="$c"
+                echo "  -> matched catalog '$c' (contains schema $SCHEMA)"
+                break
+              fi
+            done
+            if [ -z "$CATALOG" ]; then
+              CATALOG="aws_billing"
+              echo "  -> no aws_billing* catalog contains schema $SCHEMA; falling back to '$CATALOG' (terraform apply may not have run for this account)"
+            fi
+          fi
+
+          {
+            echo "account_id=$ACCOUNT_ID"
+            echo "catalog=$CATALOG"
+            echo "schema=$SCHEMA"
+            echo "bucket=$BUCKET"
+          } >> "$GITHUB_OUTPUT"
+          echo "Account=$ACCOUNT_ID Catalog=$CATALOG Schema=$SCHEMA Bucket=$BUCKET"
+
+      # AWS BCM Data Exports delivers the first CUR snapshot up to ~24h
+      # after the export is created. Probe S3 first; if no Parquet yet,
+      # exit cleanly so the workflow is idempotent across the cold-start
+      # window. Subsequent runs (after CUR delivery) proceed normally.
+      - name: Probe CUR S3 path for Parquet files
+        id: probe
+        env:
+          BUCKET: ${{ steps.ctx.outputs.bucket }}
+        run: |
+          set -euo pipefail
+          if ! aws s3 ls "s3://$BUCKET/" > /dev/null 2>&1; then
+            echo "::error::Cannot list s3://$BUCKET/ — check IAM permissions or bucket name"
+            exit 1
+          fi
+          # CUR Parquet files: cur/<export-name>/data/BILLING_PERIOD=YYYY-MM/...
+          COUNT=$(aws s3 ls "s3://$BUCKET/cur/" --recursive 2>/dev/null \
+                    | grep -c '\.parquet$' || true)
+          echo "parquet_count=$COUNT" >> "$GITHUB_OUTPUT"
+          if [ "$COUNT" = "0" ]; then
+            echo "has_parquet=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No CUR Parquet files at s3://$BUCKET/cur/ yet. AWS BCM Data Exports delivery typically takes up to 24h — nothing to ingest."
+          else
+            echo "has_parquet=true" >> "$GITHUB_OUTPUT"
+            echo "Found $COUNT Parquet file(s); proceeding with ingest."
+          fi
+
+      - name: Resolve SQL warehouse ID
+        id: warehouse
+        if: steps.probe.outputs.has_parquet == 'true'
+        env:
+          DATABRICKS_HOST: ${{ secrets.databricks_host }}
+          DATABRICKS_TOKEN: ${{ secrets.databricks_token }}
+          WH_NAME: ${{ inputs.warehouse_name }}
+        run: |
+          set -euo pipefail
+          WH_ID=$(curl -fsSL \
+            -H "Authorization: Bearer $DATABRICKS_TOKEN" \
+            "$DATABRICKS_HOST/api/2.0/sql/warehouses" \
+            | jq -r --arg n "$WH_NAME" '.warehouses[]? | select(.name==$n) | .id' \
+            | head -1)
+          if [ -z "$WH_ID" ]; then
+            echo "::error::SQL warehouse '$WH_NAME' not found"
+            exit 1
+          fi
+          echo "id=$WH_ID" >> "$GITHUB_OUTPUT"
+          echo "Using warehouse '$WH_NAME' (id=$WH_ID)"
+
+      # The Statement Execution API does NOT auto-start a stopped warehouse;
+      # statements sit in PENDING until the warehouse is RUNNING, then time
+      # out. Start explicitly and poll until RUNNING (max ~5 min).
+      - name: Start SQL warehouse and wait for RUNNING
+        if: steps.probe.outputs.has_parquet == 'true'
+        env:
+          DATABRICKS_HOST: ${{ secrets.databricks_host }}
+          DATABRICKS_TOKEN: ${{ secrets.databricks_token }}
+          WH_ID: ${{ steps.warehouse.outputs.id }}
+        run: |
+          set -euo pipefail
+          get_state() {
+            curl -fsSL \
+              -H "Authorization: Bearer $DATABRICKS_TOKEN" \
+              "$DATABRICKS_HOST/api/2.0/sql/warehouses/$WH_ID" \
+              | jq -r '.state'
+          }
+          STATE=$(get_state)
+          echo "Initial warehouse state: $STATE"
+          if [ "$STATE" = "STOPPED" ] || [ "$STATE" = "STOPPING" ]; then
+            echo "Issuing /start..."
+            curl -fsSL -X POST \
+              -H "Authorization: Bearer $DATABRICKS_TOKEN" \
+              "$DATABRICKS_HOST/api/2.0/sql/warehouses/$WH_ID/start" \
+              > /dev/null
+          fi
+          for i in $(seq 1 20); do
+            STATE=$(get_state)
+            echo "  poll $i: state=$STATE"
+            case "$STATE" in
+              RUNNING) break ;;
+              STOPPED|STOPPING|DELETING|DELETED)
+                echo "::error::Warehouse entered terminal state '$STATE' before reaching RUNNING"
+                exit 1
+                ;;
+            esac
+            sleep 15
+          done
+          if [ "$STATE" != "RUNNING" ]; then
+            echo "::error::Warehouse did not reach RUNNING within ~5 minutes (last state=$STATE)"
+            exit 1
+          fi
+          echo "Warehouse is RUNNING."
+
+      - name: Run ingest SQL
+        if: steps.probe.outputs.has_parquet == 'true'
+        env:
+          DATABRICKS_HOST: ${{ secrets.databricks_host }}
+          DATABRICKS_TOKEN: ${{ secrets.databricks_token }}
+          WH_ID: ${{ steps.warehouse.outputs.id }}
+          CATALOG: ${{ steps.ctx.outputs.catalog }}
+          SCHEMA: ${{ steps.ctx.outputs.schema }}
+          BUCKET: ${{ steps.ctx.outputs.bucket }}
+        run: |
+          set -euo pipefail
+
+          # Submit one SQL statement to the Statement Execution API and
+          # poll until it terminates. 10-minute hard ceiling per statement.
+          MAX_POLL_ITERATIONS=120  # 120 * 5s = 10 min
+          execute_sql() {
+            local sql="$1"
+            local label="${2:-statement}"
+            echo "==> $label"
+            local payload
+            payload=$(jq -n \
+              --arg s "$sql" \
+              --arg w "$WH_ID" \
+              '{statement: $s, warehouse_id: $w, wait_timeout: "30s", on_wait_timeout: "CONTINUE"}')
+            local resp
+            resp=$(curl -fsSL -X POST \
+              -H "Authorization: Bearer $DATABRICKS_TOKEN" \
+              -H "Content-Type: application/json" \
+              "$DATABRICKS_HOST/api/2.0/sql/statements" \
+              -d "$payload")
+            local state id i
+            state=$(echo "$resp" | jq -r '.status.state')
+            id=$(echo "$resp" | jq -r '.statement_id')
+            i=0
+            while [ "$state" = "PENDING" ] || [ "$state" = "RUNNING" ]; do
+              i=$((i + 1))
+              if [ "$i" -gt "$MAX_POLL_ITERATIONS" ]; then
+                echo "::error::SQL '$label' did not terminate within 10 min (last state=$state, statement_id=$id)"
+                curl -fsSL -X POST \
+                  -H "Authorization: Bearer $DATABRICKS_TOKEN" \
+                  "$DATABRICKS_HOST/api/2.0/sql/statements/$id/cancel" \
+                  > /dev/null || true
+                return 1
+              fi
+              sleep 5
+              resp=$(curl -fsSL \
+                -H "Authorization: Bearer $DATABRICKS_TOKEN" \
+                "$DATABRICKS_HOST/api/2.0/sql/statements/$id")
+              state=$(echo "$resp" | jq -r '.status.state')
+            done
+            if [ "$state" != "SUCCEEDED" ]; then
+              echo "::error::SQL '$label' ended in state=$state"
+              echo "$resp" | jq -r '.status.error.message // "no error message"'
+              return 1
+            fi
+            local first_row
+            first_row=$(echo "$resp" | jq -r '.result.data_array[0][0] // empty')
+            if [ -n "$first_row" ]; then echo "    -> $first_row"; fi
+          }
+
+          BRONZE="$CATALOG.$SCHEMA.cur_raw"
+          # AWS BCM CUR 2.0 layout (fixed by AWS):
+          #   cur/<export-name>/data/BILLING_PERIOD=YYYY-MM/*.snappy.parquet
+          # The * wildcard matches any export-name override.
+          SOURCE="'s3://$BUCKET/cur/*/data/'"
+
+          # 1. First-run safety: create bronze with inferred Parquet schema,
+          #    zero rows. No-op on subsequent runs. read_files() (TVF)
+          #    instead of legacy parquet.\`...\` direct-query syntax —
+          #    serverless SQL warehouses on Free Edition reject the legacy
+          #    form with FAILED_TO_CREATE_PLAN_FOR_DIRECT_QUERY.
+          execute_sql \
+            "CREATE TABLE IF NOT EXISTS $BRONZE USING DELTA AS SELECT * FROM read_files($SOURCE, format => 'parquet') WHERE 1=0" \
+            "ensure bronze table exists"
+
+          # 2. Idempotent ingest. COPY INTO tracks loaded file URIs in the
+          #    table's _commit_logs and skips files already loaded.
+          execute_sql \
+            "COPY INTO $BRONZE FROM $SOURCE FILEFORMAT = PARQUET FORMAT_OPTIONS ('mergeSchema' = 'true') COPY_OPTIONS ('mergeSchema' = 'true')" \
+            "COPY INTO bronze (incremental)"
+
+          # 3. Refresh Silver and Gold views from the canonical templates
+          #    in this reusable-workflows repo (checked out at _reusable/).
+          for f in \
+            _reusable/sql/cur-ingest/cur_typed.sql \
+            _reusable/sql/cur-ingest/cur_arn_summary.sql; do
+            label=$(basename "$f")
+            sql=$(sed -e "s/__CATALOG__/$CATALOG/g" -e "s/__SCHEMA__/$SCHEMA/g" "$f")
+            sql=$(echo "$sql" | sed -e 's/^--.*$//')
+            execute_sql "$sql" "refresh view $label"
+          done
+
+          # 4. Sanity check.
+          execute_sql \
+            "SELECT count(*) AS row_count FROM $BRONZE" \
+            "row count after ingest"
+
+          echo "Ingest complete."
