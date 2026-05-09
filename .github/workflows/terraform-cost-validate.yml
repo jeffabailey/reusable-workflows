@@ -85,6 +85,15 @@ on:
         required: true
       aws_secret_access_key:
         required: true
+      aws_profile:
+        # Optional. If provided, used as the profile-name label in
+        # ~/.aws/credentials and as TF_VAR_aws_profile, instead of the
+        # STS-derived account ID. The state-backend key still uses the
+        # account ID so multi-account state layouts keep working.
+        # Note: this is a label only — the credentials passed via
+        # aws_access_key_id / aws_secret_access_key still determine which
+        # AWS account is hit.
+        required: false
       databricks_host:
         required: true
       databricks_token:
@@ -222,13 +231,21 @@ jobs:
 
       # Two-step credentials setup:
       #   1) Inject env-var creds so we can call sts:GetCallerIdentity to
-      #      learn the account ID.
-      #   2) Write ~/.aws/credentials with that account ID as the profile
-      #      name, because the AWS Terraform provider has
-      #      `profile = var.aws_profile` set and therefore reads from a
-      #      named profile (it ignores AWS_ACCESS_KEY_ID env vars when
-      #      `profile` is configured). Runner is ephemeral; the file is
-      #      gone at job teardown.
+      #      learn the account ID (used as the per-account state-key
+      #      segment regardless of profile-name labeling).
+      #   2) Write ~/.aws/credentials under a profile name. Profile name
+      #      precedence:
+      #        a. `aws_profile` secret if provided (caller's choice — e.g.
+      #           "canzan", matches the user's existing profile-based
+      #           Terraform provider config).
+      #        b. STS-derived 12-digit account ID otherwise.
+      #      The AWS Terraform provider has `profile = var.aws_profile`
+      #      set and therefore reads from a named profile (it ignores
+      #      AWS_ACCESS_KEY_ID env vars when `profile` is configured).
+      #      Runner is ephemeral; the file is gone at job teardown.
+      #
+      #      NB: profile name is just a LABEL. The actual account hit is
+      #      determined by aws_access_key_id / aws_secret_access_key.
       - name: Configure AWS env credentials (for STS lookup)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -247,11 +264,27 @@ jobs:
           echo "account_id=$ACCOUNT_ID" >> "$GITHUB_OUTPUT"
           echo "Derived account ID: $ACCOUNT_ID"
 
-      - name: Write ~/.aws/credentials (profile = account_id)
+      - name: Resolve profile name (caller-provided or account_id)
+        id: profile
+        env:
+          PASSED_PROFILE: ${{ secrets.aws_profile }}
+          ACCOUNT_ID: ${{ steps.account.outputs.account_id }}
+        run: |
+          if [ -n "$PASSED_PROFILE" ]; then
+            NAME="$PASSED_PROFILE"
+            SOURCE="aws_profile secret"
+          else
+            NAME="$ACCOUNT_ID"
+            SOURCE="STS-derived account ID"
+          fi
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "Profile name: $NAME (source: $SOURCE)"
+
+      - name: Write ~/.aws/credentials
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.aws_access_key_id }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.aws_secret_access_key }}
-          PROFILE_NAME: ${{ steps.account.outputs.account_id }}
+          PROFILE_NAME: ${{ steps.profile.outputs.name }}
         run: |
           mkdir -p ~/.aws
           umask 077
@@ -277,7 +310,7 @@ jobs:
         id: plan
         working-directory: ${{ inputs.working_directory }}
         env:
-          TF_VAR_aws_profile: ${{ steps.account.outputs.account_id }}
+          TF_VAR_aws_profile: ${{ steps.profile.outputs.name }}
           TF_VAR_aws_region: ${{ inputs.aws_region }}
           TF_VAR_databricks_host: ${{ secrets.databricks_host }}
           TF_VAR_alert_email: ${{ secrets.alert_email }}
