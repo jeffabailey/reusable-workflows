@@ -12,6 +12,15 @@ on:
       cloudfront_distribution_id:
         required: true
         type: string
+      hugo_version:
+        description: >-
+          Hugo version to build with, e.g. "0.164.0". Callers should pass the
+          version their own site requires: templates can depend on Hugo APIs
+          introduced in a specific release, so a stale pin fails the build.
+          Defaults to "latest".
+        required: false
+        type: string
+        default: 'latest'
     secrets:
       aws_access_key_id:
         required: true
@@ -54,11 +63,13 @@ jobs:
       - name: Set Default Git Branch
         run: git config --global init.defaultBranch main
 
-      # Setup Hugo (pin to the version you're actually using from the log)
+      # Version comes from the caller (see the hugo_version input), so each site
+      # builds with the Hugo its own templates require instead of a pin held
+      # here on every consumer's behalf.
       - name: Setup Hugo
         uses: peaceiris/actions-hugo@v3
         with:
-          hugo-version: '0.161.1'
+          hugo-version: ${{ inputs.hugo_version }}
           extended: true
 
       - name: Get Hugo version

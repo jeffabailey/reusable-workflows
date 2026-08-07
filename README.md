@@ -73,7 +73,32 @@ A comprehensive Hugo deployment workflow that builds and deploys Hugo sites to A
 - `website_repository` (required): The repository containing the Hugo site
 - `s3_bucket_name` (required): S3 bucket name for deployment
 - `cloudfront_distribution_id` (required): CloudFront distribution ID for cache invalidation
+- `hugo_version` (optional): Hugo version to build with, e.g. `0.164.0` (default: `latest`)
 - `debug` (optional): Enable debug mode for verbose output (default: false)
+
+**Pass `hugo_version` explicitly.** A site's templates can depend on Hugo APIs
+introduced in a specific release, so the version belongs to the caller, not to
+this workflow. Keeping it in a file in the site repo and reading it in a small
+job before the call gives every consumer one source of truth:
+
+```yaml
+jobs:
+  hugo-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        run: echo "version=$(head -n 1 hugo/.hugo-version | tr -d '[:space:]' | sed 's/^v//')" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: hugo-version
+    uses: jeffabailey/reusable-workflows/.github/workflows/hugo-deploy.yml@master
+    with:
+      hugo_version: ${{ needs.hugo-version.outputs.version }}
+      # ...remaining inputs
+```
 
 **Secrets:**
 - `aws_access_key_id` (required): AWS access key for S3 and CloudFront operations
