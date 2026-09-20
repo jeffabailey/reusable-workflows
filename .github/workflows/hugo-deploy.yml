@@ -12,6 +12,23 @@ on:
       cloudfront_distribution_id:
         required: true
         type: string
+      browser_tests:
+        description: >-
+          Run the caller's Playwright suite against the live site after the
+          CloudFront invalidation. Skipped automatically when the repository has
+          no tests/browser/package.json, so sites without a suite need change
+          nothing. Set false to opt out even when the suite exists.
+        required: false
+        type: boolean
+        default: true
+      browser_tests_url:
+        description: >-
+          Base URL the suite runs against, for example https://jeffbailey.us.
+          Left empty, the suite falls back to the baseURL in its own
+          playwright.config.
+        required: false
+        type: string
+        default: ''
       hugo_version:
         description: >-
           Hugo version to build with, e.g. "0.164.0". Callers should pass the
@@ -123,6 +140,59 @@ jobs:
           aws cloudfront create-invalidation \
             --distribution-id ${{ inputs.cloudfront_distribution_id }} \
             --paths "/*"
+
+      # Post-deploy smoke tests. The invalidation above is what makes them
+      # meaningful: they run against the live site, after the new objects are
+      # served, so they catch what a build cannot (redirects at the edge,
+      # response headers, rendered DOM, layout at phone width).
+      #
+      # A failure here does not roll the deploy back: the objects are already in
+      # S3. It fails the workflow so the break is visible immediately instead of
+      # in Search Console weeks later.
+      - name: Check for a browser test suite
+        id: browser-suite
+        if: ${{ inputs.browser_tests }}
+        run: |
+          if [ -f tests/browser/package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "No tests/browser/package.json; skipping browser tests."
+          fi
+
+      # No npm cache: tests/browser/package-lock.json is gitignored in at least
+      # one consumer, and setup-node fails when the cache-dependency-path does
+      # not exist.
+      - name: Set up Node
+        if: ${{ steps.browser-suite.outputs.present == 'true' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install browser test dependencies
+        if: ${{ steps.browser-suite.outputs.present == 'true' }}
+        working-directory: ./tests/browser
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+          npx playwright install --with-deps chromium
+
+      - name: Run browser tests against the live site
+        if: ${{ steps.browser-suite.outputs.present == 'true' }}
+        working-directory: ./tests/browser
+        timeout-minutes: 10
+        env:
+          BASE_URL: ${{ inputs.browser_tests_url }}
+        run: npx playwright test
+
+      - name: Upload browser test report
+        if: ${{ failure() && steps.browser-suite.outputs.present == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            tests/browser/playwright-report/
+            tests/browser/test-results/
+          retention-days: 7
 
       - name: Cleanup
         uses: rtCamp/action-cleanup@master
