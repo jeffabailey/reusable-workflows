@@ -1,0 +1,276 @@
+# Reusable: OpenTofu plan + apply for one website's infrastructure
+#
+# Runs a website repo's root main.tf (S3 + CloudFront + Route 53 + ACM, built on
+# jeffabailey/terraform-aws-cloudfront-website) with OpenTofu. One caller per
+# website repo; each site keeps its own state key in its own backend block.
+#
+# Steps performed:
+#   plan  (every run)
+#     1. Clone the cloudfront-website module to the relative path main.tf
+#        expects (see "Module checkout" below)
+#     2. tofu fmt -check, tofu init, tofu validate
+#     3. tofu plan -detailed-exitcode, written to the job summary and, on a
+#        pull request, to a single PR comment that is updated in place
+#   apply (only when the caller passes apply: true AND the plan has changes)
+#     4. Re-plan and apply that plan, gated by the `apply_environment`
+#        GitHub Environment
+#
+# The apply job re-plans instead of downloading the plan job's tfplan: website
+# repos are public, and anyone who can read the repo can download its artifacts.
+#
+# Module checkout: website main.tf files reference the module by a path that is
+# relative to the operator's laptop (../../foss/terraform/...). The runner's
+# workspace is /home/runner/work/<repo>/<repo>, so the same relative path lands
+# under /home/runner/work and the config runs unchanged. actions/checkout cannot
+# write outside the workspace, hence the plain git fetch. Set module_repository
+# to "" for a site whose main.tf has no local module source.
+#
+# Locking: the site backends have no lock configured, so this workflow
+# serializes applies per repo + working directory with a concurrency group. A
+# laptop `tofu apply` running at the same moment is NOT covered by that; set
+# `use_lockfile = true` in the backend block to close the gap.
+#
+# Caller pattern:
+#
+#   name: Website Infrastructure
+#   on:
+#     pull_request: { branches: [main], paths: ['*.tf', 'redirects.yaml'] }
+#     push:         { branches: [main], paths: ['*.tf', 'redirects.yaml'] }
+#     workflow_dispatch: {}
+#   permissions:
+#     contents: read
+#     pull-requests: write
+#   jobs:
+#     infra:
+#       uses: jeffabailey/reusable-workflows/.github/workflows/website-tofu.yml@master
+#       with:
+#         apply: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+#       secrets:
+#         aws_access_key_id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+#         aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+#
+# Status checks (for branch protection) are prefixed by the caller's job id:
+#   - infra / Plan
+#   - infra / Apply
+
+name: Website OpenTofu (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      working_directory:
+        description: "Directory holding the site's root main.tf, relative to the repo root."
+        type: string
+        default: "."
+      tofu_version:
+        description: "OpenTofu version."
+        type: string
+        default: "1.12.6"
+      aws_region:
+        description: "Region for the credentials step. The provider and backend regions come from main.tf."
+        type: string
+        default: "us-east-1"
+      module_repository:
+        description: "owner/repo of the module to clone beside the site. Empty skips the clone."
+        type: string
+        default: "jeffabailey/terraform-aws-cloudfront-website"
+      module_ref:
+        description: "Branch, tag or commit SHA of the module. Pin a tag or SHA to keep module changes out of unrelated plans."
+        type: string
+        default: "master"
+      module_path:
+        description: "Where main.tf expects the module, relative to working_directory (its `source` without the trailing slash)."
+        type: string
+        default: "../../foss/terraform/terraform-aws-cloudfront-website"
+      apply:
+        description: "Apply the plan when it has changes. Callers pass true only for pushes to the default branch."
+        type: boolean
+        default: false
+      apply_environment:
+        description: "GitHub Environment that gates the apply job (add required reviewers there)."
+        type: string
+        default: "apply"
+    secrets:
+      aws_access_key_id:
+        required: true
+      aws_secret_access_key:
+        required: true
+    outputs:
+      plan_exitcode:
+        description: "tofu plan -detailed-exitcode result: 0 no changes, 2 changes."
+        value: ${{ jobs.plan.outputs.exitcode }}
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "0"
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      exitcode: ${{ steps.plan.outputs.exitcode }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Clone the module beside the site
+        if: ${{ inputs.module_repository != '' }}
+        env:
+          REPO: ${{ inputs.module_repository }}
+          REF: ${{ inputs.module_ref }}
+          MODULE_PATH: ${{ inputs.module_path }}
+        run: |
+          set -euo pipefail
+          target="$(realpath -m "$PWD/$MODULE_PATH")"
+          echo "Cloning ${REPO}@${REF} into ${target}"
+          git init -q "$target"
+          git -C "$target" fetch -q --depth 1 "https://github.com/${REPO}.git" "$REF"
+          git -C "$target" checkout -q FETCH_HEAD
+          echo "Module commit: $(git -C "$target" rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: ${{ inputs.tofu_version }}
+          tofu_wrapper: false
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.aws_access_key_id }}
+          aws-secret-access-key: ${{ secrets.aws_secret_access_key }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: tofu fmt
+        run: tofu fmt -check -diff
+
+      - name: tofu init
+        run: tofu init
+
+      - name: tofu validate
+        run: tofu validate -no-color
+
+      - name: tofu plan
+        id: plan
+        run: |
+          set +e
+          tofu plan -no-color -detailed-exitcode -out=tfplan > plan.txt 2>&1
+          exitcode=$?
+          set -e
+          echo "exitcode=${exitcode}" >> "$GITHUB_OUTPUT"
+          {
+            echo "## tofu plan (\`${{ inputs.working_directory }}\`)"
+            echo '```'
+            head -c 60000 plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # 0 = no changes, 2 = changes, anything else = error.
+          if [ "$exitcode" != "0" ] && [ "$exitcode" != "2" ]; then
+            cat plan.txt
+            exit 1
+          fi
+
+      - name: Comment plan on PR
+        if: ${{ always() && github.event_name == 'pull_request' && steps.plan.outcome != 'skipped' }}
+        uses: actions/github-script@v8
+        env:
+          PLAN_PATH: ${{ inputs.working_directory }}/plan.txt
+          PLAN_EXIT: ${{ steps.plan.outputs.exitcode }}
+          WORKING_DIRECTORY: ${{ inputs.working_directory }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = `<!-- website-tofu-plan:${process.env.WORKING_DIRECTORY} -->`;
+            const planText = fs.existsSync(process.env.PLAN_PATH)
+              ? fs.readFileSync(process.env.PLAN_PATH, 'utf8')
+              : '(no plan output)';
+            const truncated = planText.length > 60000
+              ? planText.slice(0, 60000) + `\n\n...[truncated; full plan in ${process.env.RUN_URL}]`
+              : planText;
+            const status = {
+              '0': 'No changes. Infrastructure matches the configuration.',
+              '2': 'Changes detected. They apply when this merges to main.',
+            }[process.env.PLAN_EXIT] ?? 'Plan errored.';
+            const body = [
+              marker,
+              `## OpenTofu plan (\`${process.env.WORKING_DIRECTORY}\`)`,
+              '',
+              `**Status**: ${status}`,
+              '',
+              '<details><summary>Plan output</summary>',
+              '',
+              '```hcl',
+              truncated,
+              '```',
+              '',
+              '</details>',
+            ].join('\n');
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const existing = comments.find(c => c.body?.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+  apply:
+    name: Apply
+    needs: plan
+    if: ${{ inputs.apply && needs.plan.outputs.exitcode == '2' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: ${{ inputs.apply_environment }}
+    # One apply at a time per site; never cancel an apply mid-flight.
+    concurrency:
+      group: website-tofu-apply-${{ github.repository }}-${{ inputs.working_directory }}
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Clone the module beside the site
+        if: ${{ inputs.module_repository != '' }}
+        env:
+          REPO: ${{ inputs.module_repository }}
+          REF: ${{ inputs.module_ref }}
+          MODULE_PATH: ${{ inputs.module_path }}
+        run: |
+          set -euo pipefail
+          target="$(realpath -m "$PWD/$MODULE_PATH")"
+          git init -q "$target"
+          git -C "$target" fetch -q --depth 1 "https://github.com/${REPO}.git" "$REF"
+          git -C "$target" checkout -q FETCH_HEAD
+          echo "Module commit: $(git -C "$target" rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: ${{ inputs.tofu_version }}
+          tofu_wrapper: false
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.aws_access_key_id }}
+          aws-secret-access-key: ${{ secrets.aws_secret_access_key }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: tofu init
+        run: tofu init
+
+      - name: tofu plan
+        run: tofu plan -no-color -out=tfplan
+
+      - name: tofu apply
+        run: tofu apply -no-color -auto-approve tfplan
