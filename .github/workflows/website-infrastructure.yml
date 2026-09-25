@@ -42,7 +42,7 @@
 #     pull-requests: write
 #   jobs:
 #     infra:
-#       uses: jeffabailey/reusable-workflows/.github/workflows/website-tofu.yml@master
+#       uses: jeffabailey/reusable-workflows/.github/workflows/website-infrastructure.yml@master
 #       with:
 #         apply: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
 #       secrets:
@@ -53,7 +53,7 @@
 #   - infra / Plan
 #   - infra / Apply
 
-name: Website OpenTofu (reusable)
+name: Website Infrastructure (reusable)
 
 on:
   workflow_call:
@@ -134,7 +134,7 @@ jobs:
           echo "Module commit: $(git -C "$target" rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up OpenTofu
-        uses: opentofu/setup-opentofu@v1
+        uses: opentofu/setup-opentofu@v2
         with:
           tofu_version: ${{ inputs.tofu_version }}
           tofu_wrapper: false
@@ -186,7 +186,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const marker = `<!-- website-tofu-plan:${process.env.WORKING_DIRECTORY} -->`;
+            const marker = `<!-- website-infrastructure-plan:${process.env.WORKING_DIRECTORY} -->`;
             const planText = fs.existsSync(process.env.PLAN_PATH)
               ? fs.readFileSync(process.env.PLAN_PATH, 'utf8')
               : '(no plan output)';
@@ -230,7 +230,7 @@ jobs:
     environment: ${{ inputs.apply_environment }}
     # One apply at a time per site; never cancel an apply mid-flight.
     concurrency:
-      group: website-tofu-apply-${{ github.repository }}-${{ inputs.working_directory }}
+      group: website-infrastructure-apply-${{ github.repository }}-${{ inputs.working_directory }}
       cancel-in-progress: false
     defaults:
       run:
@@ -254,7 +254,7 @@ jobs:
           echo "Module commit: $(git -C "$target" rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up OpenTofu
-        uses: opentofu/setup-opentofu@v1
+        uses: opentofu/setup-opentofu@v2
         with:
           tofu_version: ${{ inputs.tofu_version }}
           tofu_wrapper: false
