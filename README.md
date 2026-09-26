@@ -243,13 +243,21 @@ Before using these workflows, ensure all required secrets are defined in your re
 - `ACCESS_TOKEN`: GitHub personal access token
 
 ### Workflow Dependencies
-These workflows use the following actions:
-- `aws-actions/configure-aws-credentials@v4`
-- `actions/checkout@v4`
-- `actions/cache@v3`
-- `peaceiris/actions-hugo@v2.6.0`
+These workflows use the following actions (all on Node 24, composite, or Docker; jobs run on `ubuntu-24.04`):
+- `actions/checkout@v6`
+- `actions/setup-node@v6`
+- `actions/setup-python@v6`
+- `actions/upload-artifact@v6`
+- `actions/github-script@v8`
+- `aws-actions/configure-aws-credentials@v6`
+- `peaceiris/actions-hugo@v3`
+- `hashicorp/setup-terraform@v4`
+- `terraform-linters/setup-tflint@v6`
+- `opentofu/setup-opentofu@v2`
 - `treosh/lighthouse-ci-action@v12`
 - `rtCamp/action-cleanup@master`
+
+`jeffbaileyblog/tests/regression/workflows/test_action_runtimes.sh --dir <this repo>` fails on `ubuntu-latest` and on action majors that run on Node 20 or older.
 
 ## Maintenance
 
