@@ -72,7 +72,7 @@ jobs:
           echo "Token source: ${TOKEN_SOURCE}"
           if [ -n "$TOKEN" ]; then
             TOKEN_LEN=${#TOKEN}
-            if [ $TOKEN_LEN -gt 8 ]; then
+            if [ "$TOKEN_LEN" -gt 8 ]; then
               TOKEN_PREFIX="${TOKEN:0:8}"
               TOKEN_SUFFIX="${TOKEN: -8}"
               echo "Token verification (first 8 + last 8 chars): ${TOKEN_PREFIX}...${TOKEN_SUFFIX}"

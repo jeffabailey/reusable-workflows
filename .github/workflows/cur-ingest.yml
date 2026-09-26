@@ -348,6 +348,7 @@ jobs:
             _reusable/sql/cur-ingest/cur_arn_summary.sql; do
             label=$(basename "$f")
             sql=$(sed -e "s/__CATALOG__/$CATALOG/g" -e "s/__SCHEMA__/$SCHEMA/g" "$f")
+            # shellcheck disable=SC2001 # per-line anchored regex over multi-line SQL; ${var//} cannot anchor on each line
             sql=$(echo "$sql" | sed -e 's/^--.*$//')
             execute_sql "$sql" "refresh view $label"
           done
