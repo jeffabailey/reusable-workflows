@@ -25,18 +25,18 @@ on:
 jobs:
   exportPosts:
     name: "Export Hugo content for Databricks"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-access-key-id: ${{ secrets.aws_access_key_id }}
           aws-secret-access-key: ${{ secrets.aws_secret_access_key }}
           aws-region: us-east-1
 
       - name: Checkout reusable-workflows
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: jeffabailey/reusable-workflows
           token: ${{ secrets.access_token }}
@@ -44,7 +44,7 @@ jobs:
           path: reusable-workflows
 
       - name: Checkout website repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ github.repository }}
           fetch-depth: 1
@@ -54,7 +54,7 @@ jobs:
         run: git config --global init.defaultBranch master
 
       - name: Setup Hugo
-        uses: peaceiris/actions-hugo@v2.6.0
+        uses: peaceiris/actions-hugo@v3
         with:
           hugo-version: '0.154.5'
           extended: true

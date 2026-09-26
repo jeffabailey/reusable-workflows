@@ -91,20 +91,20 @@ on:
 jobs:
   ingest:
     name: COPY INTO bronze + refresh Silver/Gold views
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       # Checkout this reusable-workflows repo (NOT the caller's) — the SQL
       # view templates at sql/cur-ingest/*.sql are the canonical source of
       # truth and travel with this workflow.
       - name: Checkout reusable-workflows (for SQL templates)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: jeffabailey/reusable-workflows
           ref: ${{ inputs.ref }}
           path: _reusable
 
       - name: Configure AWS credentials (for STS lookup)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-access-key-id: ${{ secrets.aws_access_key_id }}
           aws-secret-access-key: ${{ secrets.aws_secret_access_key }}

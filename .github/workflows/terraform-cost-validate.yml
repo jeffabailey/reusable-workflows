@@ -108,10 +108,10 @@ env:
 jobs:
   validate:
     name: Validate (fmt + validate + tflint)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # If the caller's working_directory input does not exist in the
       # checked-out repo, create an empty one. Without this, downstream
@@ -152,7 +152,7 @@ jobs:
           fi
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ inputs.terraform_version }}
           terraform_wrapper: false
@@ -170,7 +170,7 @@ jobs:
         run: terraform validate
 
       - name: Setup TFLint
-        uses: terraform-linters/setup-tflint@v4
+        uses: terraform-linters/setup-tflint@v6
         with:
           tflint_version: ${{ inputs.tflint_version }}
 
@@ -186,12 +186,12 @@ jobs:
 
   plan:
     name: Plan (AWS + Databricks)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: validate
     environment: ${{ inputs.plan_environment }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Ensure working directory exists with at least a placeholder
         env:
@@ -224,7 +224,7 @@ jobs:
           fi
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ inputs.terraform_version }}
           terraform_wrapper: false
@@ -247,7 +247,7 @@ jobs:
       #      NB: profile name is just a LABEL. The actual account hit is
       #      determined by aws_access_key_id / aws_secret_access_key.
       - name: Configure AWS env credentials (for STS lookup)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-access-key-id: ${{ secrets.aws_access_key_id }}
           aws-secret-access-key: ${{ secrets.aws_secret_access_key }}
@@ -335,7 +335,7 @@ jobs:
 
       - name: Upload plan artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: tfplan-${{ github.run_id }}
           path: |
@@ -345,7 +345,7 @@ jobs:
 
       - name: Comment plan on PR
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           PLAN_PATH: ${{ inputs.working_directory }}/plan.txt
           ACCOUNT_ID: ${{ steps.account.outputs.account_id }}

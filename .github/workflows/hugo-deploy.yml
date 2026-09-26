@@ -49,7 +49,7 @@ on:
 jobs:
   deploywebsite:
     name: "Deploy Website"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     # Hugo's own cache dir (for modules / remote resources)
     env:
@@ -181,9 +181,10 @@ jobs:
       # not exist.
       - name: Set up Node
         if: ${{ steps.browser-suite.outputs.present == 'true' }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
+          package-manager-cache: false
 
       - name: Install browser test dependencies
         if: ${{ steps.browser-suite.outputs.present == 'true' }}
@@ -202,7 +203,7 @@ jobs:
 
       - name: Upload browser test report
         if: ${{ failure() && steps.browser-suite.outputs.present == 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: playwright-report
           path: |

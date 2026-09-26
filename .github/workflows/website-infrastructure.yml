@@ -107,7 +107,7 @@ env:
 jobs:
   plan:
     name: Plan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     outputs:
       exitcode: ${{ steps.plan.outputs.exitcode }}
@@ -225,7 +225,7 @@ jobs:
     name: Apply
     needs: plan
     if: ${{ inputs.apply && needs.plan.outputs.exitcode == '2' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment: ${{ inputs.apply_environment }}
     # One apply at a time per site; never cancel an apply mid-flight.

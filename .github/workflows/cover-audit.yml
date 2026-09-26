@@ -11,7 +11,7 @@ on:
 jobs:
   cover_audit:
     name: "Social Cover Audit"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Mock Social Cover Audit (Local Testing)
         if: env.ACT == 'true'

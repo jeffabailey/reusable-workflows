@@ -21,9 +21,9 @@ on:
 jobs:
   slackNotification:
     name: Slack Notification
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v6
     - name: Slack Notification
       uses: rtCamp/action-slack-notify@v2
       env:
@@ -34,7 +34,7 @@ jobs:
         SLACK_USERNAME: github-action-slack-notify
   generateDiagrams:
     name: "Export Diagrams"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       working-directory: ./structurizr
       node-version: "15.10.0"
@@ -53,14 +53,14 @@ jobs:
           SLACK_MESSAGE: 'Exporting diagrams :earth_americas:'
           SLACK_COLOR: ${{ job.status }} # or a specific color like 'good' or '#ff00ff'
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-access-key-id: ${{ secrets.aws_access_key_id }}
           aws-secret-access-key: ${{ secrets.aws_secret_access_key }}
           aws-region: us-east-1
 
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v6
         with:
           repository: ${{ inputs.diagram_repository }}
           token: ${{ secrets.ACCESS_TOKEN }}
@@ -79,7 +79,7 @@ jobs:
           git config --global init.defaultBranch master
 
       - name: Checkout gatsby
-        uses: actions/checkout@v2
+        uses: actions/checkout@v6
         with:
           repository: jeffabailey/gatsby
           path: gatsby
@@ -94,9 +94,10 @@ jobs:
           cat ${{env.working-directory}}/wordpress/config.ts
 
       - name: Yarn Install
-        uses: actions/setup-node@v2
+        uses: actions/setup-node@v6
         with:
           node-version: ${{env.node-version}}
+          package-manager-cache: false
       - run: yarn --cwd ${{env.working-directory}}/wordpress install
       - run: yarn --cwd ${{env.working-directory}}/wordpress build
       # - run: yarn --cwd ${{env.working-directory}}/gatsby test:unit
