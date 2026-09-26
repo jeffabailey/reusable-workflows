@@ -110,26 +110,42 @@ jobs:
             find ./hugo/data -name '*.jsonc' -exec sh -c 'npx -y json5 -s 2 "$1" > "${1%.jsonc}.json"' _ {} \;
           fi
 
+      # Two cache classes. Documents keep their URL when their content changes
+      # (HTML, feeds, sitemaps, llm.txt, JSON), so browsers may hold them only
+      # briefly; a year-long max-age showed returning readers stale menus and
+      # stale fix instructions. CloudFront still caches them for a year via
+      # s-maxage, because every deploy invalidates /* below. Everything else is
+      # fingerprinted by Hugo or rarely replaced, and keeps the year-long cache.
       - name: S3 Sync
+        env:
+          ASSET_CACHE: max-age=31536000,public
+          DOCUMENT_CACHE: public,max-age=300,s-maxage=31536000
         run: |
           aws s3 sync ./hugo/public s3://${{ inputs.s3_bucket_name }} \
             --acl public-read \
-            --cache-control max-age=31536000,public \
+            --cache-control "$ASSET_CACHE" \
+            --exclude '*.html' --exclude '*.xml' --exclude '*.txt' --exclude '*.json' --exclude '*.webmanifest' \
+            --only-show-errors
+          aws s3 sync ./hugo/public s3://${{ inputs.s3_bucket_name }} \
+            --acl public-read \
+            --cache-control "$DOCUMENT_CACHE" \
+            --exclude '*' \
+            --include '*.html' --include '*.xml' --include '*.txt' --include '*.json' --include '*.webmanifest' \
             --only-show-errors
           if [ -d ./hugo/data ]; then
             aws s3 sync ./hugo/data s3://${{ inputs.s3_bucket_name }}/data \
               --acl public-read \
-              --cache-control max-age=31536000,public \
+              --cache-control "$DOCUMENT_CACHE" \
               --only-show-errors
             aws s3 sync ./hugo/data s3://${{ inputs.s3_bucket_name }}/data \
               --acl public-read \
-              --cache-control max-age=31536000,public \
+              --cache-control "$DOCUMENT_CACHE" \
               --exclude '*' --include '*.json' \
               --content-type application/json \
               --only-show-errors
             aws s3 sync ./hugo/data s3://${{ inputs.s3_bucket_name }}/data \
               --acl public-read \
-              --cache-control max-age=31536000,public \
+              --cache-control "$DOCUMENT_CACHE" \
               --exclude '*' --include '*.jsonc' \
               --content-type application/jsonc \
               --only-show-errors
