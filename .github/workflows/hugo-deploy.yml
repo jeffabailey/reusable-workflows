@@ -125,6 +125,19 @@ jobs:
             --acl public-read \
             --cache-control "$ASSET_CACHE" \
             --exclude '*.html' --exclude '*.xml' --exclude '*.txt' --exclude '*.json' --exclude '*.webmanifest' \
+            --exclude '*.gz' \
+            --only-show-errors
+          # Pre-gzipped files (e.g. nvim.wasm.gz) go up as application/gzip.
+          # Guessed from the inner extension (application/wasm), CloudFront
+          # gzips them a second time and sends Content-Encoding: gzip, which
+          # left a browser worker compiling gzip bytes. CloudFront does not
+          # compress application/gzip. cp, not sync, so existing objects get
+          # the new Content-Type even when their bytes are unchanged.
+          aws s3 cp ./hugo/public s3://${{ inputs.s3_bucket_name }} --recursive \
+            --acl public-read \
+            --cache-control "$ASSET_CACHE" \
+            --exclude '*' --include '*.gz' \
+            --content-type application/gzip \
             --only-show-errors
           aws s3 sync ./hugo/public s3://${{ inputs.s3_bucket_name }} \
             --acl public-read \
