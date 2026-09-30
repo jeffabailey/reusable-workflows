@@ -219,6 +219,11 @@ jobs:
       # The Statement Execution API does NOT auto-start a stopped warehouse;
       # statements sit in PENDING until the warehouse is RUNNING, then time
       # out. Start explicitly and poll until RUNNING (max ~5 min).
+      #
+      # Serverless /start intermittently returns HTTP 400 on a cold
+      # warehouse and succeeds on a later attempt (same as clicking Start
+      # in the UI a few times). Retry /start with backoff, and re-issue it
+      # if the warehouse falls back to STOPPED while we poll.
       - name: Start SQL warehouse and wait for RUNNING
         if: steps.probe.outputs.has_parquet == 'true'
         env:
@@ -233,21 +238,53 @@ jobs:
               "$DATABRICKS_HOST/api/2.0/sql/warehouses/$WH_ID" \
               | jq -r '.state'
           }
+          # POST /start, retrying non-2xx responses up to START_ATTEMPTS
+          # times with linear backoff (15s, 30s, 45s, ...). Logs the error
+          # body so the 400 reason shows up in the run log.
+          START_ATTEMPTS=6
+          start_warehouse() {
+            local attempt code body
+            body=$(mktemp)
+            for attempt in $(seq 1 "$START_ATTEMPTS"); do
+              echo "Issuing /start (attempt $attempt/$START_ATTEMPTS)..."
+              code=$(curl -sSL -o "$body" -w '%{http_code}' -X POST \
+                -H "Authorization: Bearer $DATABRICKS_TOKEN" \
+                "$DATABRICKS_HOST/api/2.0/sql/warehouses/$WH_ID/start" || echo "000")
+              if [[ "$code" =~ ^2 ]]; then
+                rm -f "$body"
+                return 0
+              fi
+              echo "::warning::/start returned HTTP $code: $(jq -rc '.message // .' "$body" 2>/dev/null || cat "$body")"
+              if [ "$attempt" -lt "$START_ATTEMPTS" ]; then
+                sleep $((attempt * 15))
+              fi
+            done
+            rm -f "$body"
+            echo "::error::/start failed after $START_ATTEMPTS attempts"
+            return 1
+          }
           STATE=$(get_state)
           echo "Initial warehouse state: $STATE"
           if [ "$STATE" = "STOPPED" ] || [ "$STATE" = "STOPPING" ]; then
-            echo "Issuing /start..."
-            curl -fsSL -X POST \
-              -H "Authorization: Bearer $DATABRICKS_TOKEN" \
-              "$DATABRICKS_HOST/api/2.0/sql/warehouses/$WH_ID/start" \
-              > /dev/null
+            start_warehouse
           fi
+          RESTARTS=0
+          MAX_RESTARTS=2
           for i in $(seq 1 20); do
             STATE=$(get_state)
             echo "  poll $i: state=$STATE"
             case "$STATE" in
               RUNNING) break ;;
-              STOPPED|STOPPING|DELETING|DELETED)
+              STOPPED)
+                if [ "$RESTARTS" -ge "$MAX_RESTARTS" ]; then
+                  echo "::error::Warehouse returned to STOPPED after $MAX_RESTARTS re-starts"
+                  exit 1
+                fi
+                RESTARTS=$((RESTARTS + 1))
+                echo "Warehouse fell back to STOPPED; re-issuing /start ($RESTARTS/$MAX_RESTARTS)"
+                start_warehouse
+                ;;
+              DELETING|DELETED)
                 echo "::error::Warehouse entered terminal state '$STATE' before reaching RUNNING"
                 exit 1
                 ;;
